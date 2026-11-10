@@ -4,6 +4,7 @@ import re
 import requests
 import pycountry
 import airportsdata
+from langsmith import traceable
 
 load_dotenv()
 api_key = os.getenv("AVIATIONSTACK_API_KEY")
@@ -512,7 +513,7 @@ Arrival:
 - Delay: {delay_text(arr.get("delay"))}
 """.strip()
 
-
+@traceable
 def search_flights(query: str, limit: int = 10):
     if not api_key:
         return (

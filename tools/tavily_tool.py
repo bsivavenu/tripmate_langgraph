@@ -1,11 +1,11 @@
 from tavily import TavilyClient
 import os
 from dotenv import load_dotenv
-
+from langsmith import traceable
 load_dotenv()
 
 client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
-
+@traceable
 def tavily_search(query):
     response = client.search(
         query = query, 
