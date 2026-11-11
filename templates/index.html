@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TripMate – AI Travel Planner</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✈️</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="bg" aria-hidden="true">
+    <span class="blob b1"></span>
+    <span class="blob b2"></span>
+    <span class="blob b3"></span>
+  </div>
+
+  <header class="topbar">
+    <div class="brand"><span class="logo">✈️</span><span>TripMate</span></div>
+    <button id="new-chat" class="ghost" type="button">+ New trip</button>
+  </header>
+
+  <main class="chat" id="chat" aria-live="polite">
+    <section class="welcome" id="welcome">
+      <span class="pill">✨ Powered by a multi-agent LangGraph workflow</span>
+      <h1>Plan your next trip in <span class="grad">seconds</span></h1>
+      <p class="lead">Tell TripMate where you want to go and your budget. Our AI agents search flights, find hotels and build a day-by-day itinerary for you.</p>
+
+      <div class="features">
+        <div class="feature"><span class="f-ico">✈️</span><h3>Flights</h3><p>Live flight lookup for your route</p></div>
+        <div class="feature"><span class="f-ico">🏨</span><h3>Hotels</h3><p>Stays matched to your budget</p></div>
+        <div class="feature"><span class="f-ico">🗓️</span><h3>Itinerary</h3><p>A realistic day-by-day plan</p></div>
+      </div>
+
+      <p class="try">Try one of these</p>
+      <div class="examples">
+        <button type="button" class="chip">5 day trip from Hyderabad to Seoul, budget ₹1,50,000</button>
+        <button type="button" class="chip">Weekend getaway from Bangalore to Goa under ₹20,000</button>
+        <button type="button" class="chip">7 days in Bali from Delhi, mid-range budget, 2 travellers</button>
+      </div>
+    </section>
+  </main>
+
+  <form id="composer" class="composer" autocomplete="off">
+    <div class="composer-inner">
+      <textarea id="input" rows="1" maxlength="1000"
+        placeholder="e.g. 4 day trip from Mumbai to Dubai, budget ₹80,000"
+        aria-label="Trip request"></textarea>
+      <button id="send" type="submit" aria-label="Plan trip"><span>Plan trip</span> →</button>
+    </div>
+    <p class="hint">Press Enter to send · Shift+Enter for a new line · AI can make mistakes, verify prices before booking</p>
+  </form>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+  <script src="/static/script.js"></script>
+</body>
+</html>

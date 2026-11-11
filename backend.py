@@ -14,6 +14,7 @@ from psycopg.rows import dict_row
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.postgres import PostgresSaver
 
+from pydantic import BaseModel, Field
 from langchain_core.messages import (AnyMessage,
                                     HumanMessage,
                                     AIMessage,
@@ -116,6 +117,8 @@ class TravelState(TypedDict):
     hotel_results : str
     itinerary: str
     llm_calls: int
+    destination: str
+    budget_level: str
 
 # Rules shared by the itinerary and final prompts. The flight and hotel data
 # are included further down in each prompt.
@@ -132,6 +135,32 @@ PLANNING_RULES = """Rules:
 - The flight data shows live flights near today, not schedules for future dates. Show them only as examples of airlines and flight numbers. Do not attach future dates or invent return flights.
 """
 
+class TripRequest(BaseModel):
+    """Structured fields pulled out of the user's free-text request."""
+    destination: str = Field(description="Destination city or country, e.g. 'Seoul'")
+    budget_level: str = Field(
+        description="One of: budget, mid-range, luxury. Infer from the stated budget, default mid-range."
+    )
+
+
+def parse_request(state: TravelState):
+    """Turn free text into structured fields so the search tools get clean queries.
+    Falls back to empty fields (and the old raw-query behaviour) if parsing fails."""
+    try:
+        parser = llm.with_structured_output(TripRequest)
+        trip = parser.invoke([
+            SystemMessage(content="Extract trip details from the user's request."),
+            HumanMessage(content=state["user_query"]),
+        ])
+        return {
+            "destination": trip.destination.strip(),
+            "budget_level": trip.budget_level.strip().lower(),
+            "llm_calls": state.get("llm_calls", 0) + 1,
+        }
+    except Exception:
+        return {"destination": "", "budget_level": ""}
+
+
 def flight_agent(state: TravelState):
     query = state["user_query"]
     flight_data = search_flights(query, compact=True)
@@ -144,7 +173,12 @@ def flight_agent(state: TravelState):
     }
 
 def hotel_agent(state: TravelState):
-    query = f"Best hotels for {state['user_query']}"
+    destination = state.get("destination")
+    if destination:
+        level = state.get("budget_level") or "mid-range"
+        query = f"best {level} hotels in {destination} with price per night"
+    else:  # parsing failed: fall back to the raw request
+        query = f"Best hotels for {state['user_query']}"
     hotel_results = tavily_search(query)
 
     return {
@@ -232,12 +266,14 @@ say "check visa requirements for your passport with the destination's embassy".
 graph = StateGraph(TravelState)
 
 
+graph.add_node("parse_request",parse_request)
 graph.add_node("flight_agent",flight_agent)
 graph.add_node("hotel_agent",hotel_agent)
 graph.add_node("itinerary_agent",itinerary_agent)
 graph.add_node("final_agent",final_agent)
 
-graph.add_edge(START,"flight_agent")
+graph.add_edge(START,"parse_request")
+graph.add_edge("parse_request","flight_agent")
 graph.add_edge("flight_agent","hotel_agent")
 graph.add_edge("hotel_agent","itinerary_agent")
 graph.add_edge("itinerary_agent","final_agent")
@@ -278,7 +314,9 @@ def run_travel_agent(user_input:str, thread_id: str| None= None):
         "flight_results" : "",
         "hotel_results": "",
         "itinerary": "",
-        "llm_calls": 0
+        "llm_calls": 0,
+        "destination": "",
+        "budget_level": ""
     },
     config=config
     )
