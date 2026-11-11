@@ -37,14 +37,75 @@ def get_database_url():
 
     return database_url
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    raise ValueError("GROQ API KEY is missing")
+MAX_TOKENS = 3500
+TEMPERATURE = 0.3
 
-llm = ChatGroq(
-    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
-    api_key=GROQ_API_KEY,max_tokens= 4000
+
+def build_llm():
+    """Chat model chosen by LLM_PROVIDER in .env: 'groq' (default) or 'openai'."""
+    provider = os.getenv("LLM_PROVIDER", "groq").lower()
+
+    if provider == "openai":
+        # Imported lazily so Groq-only setups don't need langchain-openai installed.
+        from langchain_openai import ChatOpenAI
+
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY is missing")
+        return ChatOpenAI(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            api_key=api_key,
+            temperature=TEMPERATURE,
+            max_tokens=MAX_TOKENS,
+            max_retries=6,
+        )
+
+    if provider != "groq":
+        raise ValueError(f"Unknown LLM_PROVIDER '{provider}' (use 'groq' or 'openai')")
+
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise ValueError("GROQ API KEY is missing")
+    return ChatGroq(
+        model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
+        api_key=api_key,
+        temperature=TEMPERATURE,
+        max_tokens=MAX_TOKENS,
+        max_retries=6,
     )
+
+
+llm = build_llm()
+
+
+def _looks_degenerate(text: str) -> bool:
+    """True if the output is mostly one repeated token (e.g. '> > > > ...')."""
+    words = text.split()
+    if len(words) < 50:
+        return False
+    most_common = max(set(words), key=words.count)
+    return words.count(most_common) / len(words) > 0.3
+
+
+def invoke_llm(messages):
+    """llm.invoke with a guard: if the reply was cut off (finish_reason 'length')
+    or is a repetition loop, retry once asking for a shorter answer."""
+    response = llm.invoke(messages)
+
+    def bad(r):
+        finish = (r.response_metadata or {}).get("finish_reason")
+        return finish == "length" or _looks_degenerate(str(r.content))
+
+    if bad(response):
+        retry_note = HumanMessage(
+            content="Your previous reply was cut off or repeated itself. "
+                    "Answer again, more concisely, in plain Markdown, and finish the answer."
+        )
+        response = llm.invoke(list(messages) + [retry_note])
+        if bad(response):
+            raise RuntimeError("The model output was cut off or looped twice; try again.")
+
+    return response
 
 # defining the state
 
@@ -55,17 +116,31 @@ class TravelState(TypedDict):
     hotel_results : str
     itinerary: str
     llm_calls: int
- 
+
+# Rules shared by the itinerary and final prompts. The flight and hotel data
+# are included further down in each prompt.
+PLANNING_RULES = """Rules:
+- Use only the flight and hotel data provided below.
+- If a fare, airline or hotel price is not in that data, write "price not available". Do not invent exact prices.
+- Ballpark estimates are allowed only when clearly labelled "estimate".
+- Trip length must match the user's request exactly (N days = N-1 nights unless stated otherwise).
+- Assume 1 traveller unless the user states otherwise.
+- All totals must add up and stay within the user's stated budget.
+- Suggest example travel dates at least 8 weeks after today's date.
+- The itinerary must contain exactly N days, with no extra day.
+- Do not state weekday names.
+- The flight data shows live flights near today, not schedules for future dates. Show them only as examples of airlines and flight numbers. Do not attach future dates or invent return flights.
+"""
+
 def flight_agent(state: TravelState):
     query = state["user_query"]
-    flight_data = search_flights(query)
+    flight_data = search_flights(query, compact=True)
 
     return {
         "flight_results": flight_data,
         "messages": [
             AIMessage(content="Flight results fetched.")
         ],
-        "llm_calls": state.get("llm_calls",0)+1
     }
 
 def hotel_agent(state: TravelState):
@@ -75,30 +150,29 @@ def hotel_agent(state: TravelState):
     return {
         "hotel_results": hotel_results,
         "messages": [
-            AIMessage(content="Hotel information fectched")
+            AIMessage(content="Hotel information fetched")
         ],
-        "llm_calls": state.get("llm_calls",0)+1
     }
 
 
 def itinerary_agent(state: TravelState):
     
-    prompt = f"""Create a complete travel itinerary for Today's date: {date.today().isoformat()} and use the hotel data and flight data provided above.
-    If a price/airline/hotel is not in the data, write "price not available"; do not invent or estimate.
-Label any estimate clearly as an estimate.
-     
-Trip length must match the user's request exactly (N days = N-1 nights unless stated otherwise).
-Assume 1 traveller unless the user states otherwise.
-All totals must add up and stay within the user's stated budget.
+    prompt = f"""Create ONLY the day-by-day plan for the user's request below.
+    Do not include a budget summary, flight tables or general tips; those are written later.
+    Keep each day to 4-6 short bullet points, with approximate costs in INR where useful.
+    Today's date: {date.today().isoformat()}
+
+{PLANNING_RULES}
 
     User Query: {state['user_query']}
     Flight Results: {state['flight_results']}
     Hotel Results: {state['hotel_results']}
 
-    Make the itinerary practical, budget aware and easy to follow.
+    Make the plan practical and budget aware. Do not claim a flight's arrival time is
+    the departure time: use the flight data exactly as given.
        """
 
-    response = llm.invoke([SystemMessage(content="you are an expert travel planner."),
+    response = invoke_llm([SystemMessage(content="you are an expert travel planner."),
                            HumanMessage(content=prompt)])
 
     return {
@@ -110,25 +184,21 @@ All totals must add up and stay within the user's stated budget.
 
 def final_agent(state: TravelState):
     final_prompt = f"""
-    Generate the final travle response for the user.
-    use the hotel data and flight data provided above.
-    If a price/airline/hotel is not in the data, write "price not available"; do not invent or estimate.
-Label any estimate clearly as an estimate.
+    Generate the final travel response for the user.
+    Today's date: {date.today().isoformat()}
 
-Trip length must match the user's request exactly (N days = N-1 nights unless stated otherwise).
-Assume 1 traveller unless the user states otherwise.
-All totals must add up and stay within the user's stated budget.
+{PLANNING_RULES}
 
-do not name a specific visa scheme (e.g. K-ETA); 
+Do not name a specific visa scheme (e.g. K-ETA);
 say "check visa requirements for your passport with the destination's embassy".
-    
+
     user Request: {state['user_query']}
 
     Flights : {state['flight_results']}
 
     Hotels:  {state['hotel_results']}
 
-    Itinerary : {state['itinerary']}
+    Day-by-day plan (reuse it as section 4, do not re-plan it): {state['itinerary']}
 
     Format the final answer beautifully using these sections:
 
@@ -145,8 +215,8 @@ say "check visa requirements for your passport with the destination's embassy".
     - Keep the response useful for real travel planning.
     """
 
-    response = llm.invoke([
-        SystemMessage(content="you are a professional AI travel boking assistant."),
+    response = invoke_llm([
+        SystemMessage(content="you are a professional AI travel booking assistant."),
         HumanMessage(content=final_prompt)
     ])
 

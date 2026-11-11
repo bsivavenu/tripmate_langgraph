@@ -17,6 +17,9 @@ def tavily_search(query):
         title = r.get("title","Unknown")
         url = r.get("url","")
         snippet = r.get("content","").strip()
+        # Remove Markdown blockquote markers ("> ...") which can make the LLM echo/loop on them.
+        snippet = "\n".join(line.lstrip("> ").rstrip() if line.lstrip().startswith(">") else line
+                            for line in snippet.splitlines())
 
         if len(snippet) > 300:
             snippet = snippet[:300].rsplit(" ",1)[0]+"..."

@@ -1,19 +1,24 @@
-from tools.tavily_tool import tavily_search
-
-
-from backend import run_travel_agent
-from tools.flight_tool import search_flights
 import uuid
 
-# print(search_flights("Plan a 7 days Japan trip from detroit"))
+from backend import run_travel_agent
 
-# res = tavily_search(" who is abdul kalam")
-# print(res)
+DEBUG = False   # set True to see raw tool data and the draft itinerary
 
-user_input = input("enter travel request")
+user_input = input("enter travel request: ")
 thread_id = f"user_{uuid.uuid4().hex}"
 
-res  = run_travel_agent(user_input, thread_id=thread_id)
+res = run_travel_agent(user_input, thread_id=thread_id)
 
 
-print(res["answer"])
+def section(title, body):
+    print(f"\n{'=' * 20} {title} {'=' * 20}")
+    print(body)
+
+
+if DEBUG:
+    section("FLIGHT RESULTS", res["flight_results"])
+    section("HOTEL RESULTS", res["hotel_results"])
+    section("ITINERARY DRAFT", res["itinerary"])
+
+section("FINAL ANSWER", res["answer"])
+print(f"\nthread_id={res['thread_id']}  llm_calls={res['llm_calls']}")

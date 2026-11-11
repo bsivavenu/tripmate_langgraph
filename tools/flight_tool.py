@@ -513,8 +513,31 @@ Arrival:
 - Delay: {delay_text(arr.get("delay"))}
 """.strip()
 
+def format_flights_compact(flights: list, max_flights: int = 5):
+    """One short line per distinct flight number (the API repeats the same flight on
+    several days), to keep LLM prompts small."""
+    seen, lines = set(), []
+    for f in flights:
+        number = (f.get("flight") or {}).get("iata")
+        if not number or number in seen:
+            continue
+        seen.add(number)
+        airline = (f.get("airline") or {}).get("name") or "Unknown airline"
+        dep = f.get("departure") or {}
+        arr = f.get("arrival") or {}
+        dep_time = (dep.get("scheduled") or "")[11:16] or "?"
+        arr_time = (arr.get("scheduled") or "")[11:16] or "?"
+        lines.append(
+            f"- {airline} {number}: {dep.get('iata') or '?'} {dep_time} -> "
+            f"{arr.get('iata') or '?'} {arr_time}"
+        )
+        if len(lines) >= max_flights:
+            break
+    return "\n".join(lines)
+
+
 @traceable
-def search_flights(query: str, limit: int = 10):
+def search_flights(query: str, limit: int = 10, compact: bool = False):
     if not api_key:
         return (
             "Flight API error: AVIATIONSTACK_API_KEY is missing.\n"
@@ -569,6 +592,9 @@ def search_flights(query: str, limit: int = 10):
                     for f in flight_data
                     if (f.get("departure") or {}).get("iata") and (f.get("arrival") or {}).get("iata")})
     route_info = "Live flights " + (", ".join(shown) if shown else "") if tried[0] != "" else "Global live flights"
+    if compact:
+        return f"{route_info}\n\n" + format_flights_compact(flight_data)
+
     formatted = [format_flight(f) for f in flight_data[:limit]]
     return f"{route_info}\n\n" + "\n\n---\n\n".join(formatted)
 
