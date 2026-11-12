@@ -1,0 +1,19 @@
+# Secrets: never bake these into the image (pass them at runtime instead)
+.env
+.env.*
+
+# Python / tooling
+.venv
+__pycache__/
+*.pyc
+.git
+.gitignore
+.playwright-mcp/
+.vscode/
+
+# Not needed at runtime
+test.py
+main.py
+README.md
+Dockerfile
+.dockerignore
