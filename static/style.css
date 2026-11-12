@@ -7,7 +7,7 @@
   --border: #e1e7f3;
   --accent: #4f46e5;
   --accent-2: #06b6d4;
-  --grad: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #06b6d4 100%);
+  --grad: linear-gradient(135deg, #f97316 0%, #ec4899 50%, #8b5cf6 100%);
   --shadow: 0 10px 40px rgba(60, 72, 140, 0.12);
   --user-bg: var(--grad);
   --error-bg: #fef0f0;

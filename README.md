@@ -2,6 +2,8 @@
 
 TripMate turns a plain-English trip request into a complete travel plan: flights, hotel suggestions, a day-by-day itinerary and a budget breakdown. It is a multi-step **LangGraph** workflow served by **FastAPI**, with a small chat-style web UI.
 
+**🌐 Live demo: <https://tripmate-langgraph.onrender.com>** (free tier: the first load after idle can take ~1 minute to wake up)
+
 > Example: *"5 day trip from Hyderabad to Seoul, budget ₹1,50,000"*
 
 ## How it works
@@ -118,6 +120,15 @@ docker run -d --name tripmate --env-file .env -p 8000:8000 tripmate
 Secrets are passed at runtime with `--env-file`; `.dockerignore` keeps `.env` out of the image. The container listens on `$PORT` (default `8000`), so it also works on hosts such as Render that set `PORT` themselves.
 
 Useful commands: `docker logs -f tripmate`, `docker stop tripmate`, `docker rm -f tripmate`.
+
+## Deployment (Render)
+
+The app is deployed on [Render](https://render.com) as a Docker web service built from this repo's `Dockerfile`.
+
+- **Auto-deploy:** every push to the tracked branch (`multi-agent`) triggers a rebuild and redeploy, usually in about a minute.
+- **Environment variables:** set the same keys as in `.env` in the service's *Environment* tab. Use Render's **internal** database URL for `DATABASE_URL` when the database is in the same region.
+- **Port:** Render injects `PORT`; the container reads it automatically.
+- **Rollback:** redeploy any earlier version from the *Deploys* tab.
 
 ## API
 
