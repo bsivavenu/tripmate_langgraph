@@ -22,7 +22,7 @@ from langchain_core.messages import (AnyMessage,
 
 from langchain_groq import ChatGroq
 # from tools.tavily_tool import tavily_search
-from mcp_client import tavily_mcp_search, aviation_stack_mcp_call
+from mcp_client import tavily_mcp_search, aviation_stack_mcp_call, weather_now
 from tools.flight_tool import search_flights
 from tools.flight_prices import search_flight_prices
 
@@ -131,6 +131,7 @@ class TravelState(TypedDict):
     user_query : str
     flight_results : str
     hotel_results : str
+    weather_results: str
     itinerary: str
     llm_calls: int
     destination: str
@@ -302,8 +303,38 @@ def hotel_agent(state: TravelState):
     }
 
 
+def weather_agent(state: TravelState):
+    """Fetch today's weather for each city via our weather MCP server."""
+    cities = state.get("cities") or []
+    if state.get("trip_type") != "multi_city" or not cities:
+        cities = [state["destination"]] if state.get("destination") else []
+
+    async def fetch_all():
+        # one call per city, run together; a failed city becomes an exception
+        # object instead of crashing the whole trip plan
+        return await asyncio.gather(
+            *[weather_now(city) for city in cities],
+            return_exceptions=True,
+        )
+
+    lines = []
+    if cities:
+        for city, result in zip(cities, asyncio.run(fetch_all())):
+            if isinstance(result, Exception):
+                lines.append(f"{city}: weather not available")
+            else:
+                lines.append(result)
+
+    return {
+        "weather_results": "\n".join(lines),
+        "messages": [
+            AIMessage(content="Weather information fetched")
+        ],
+    }
+
+
 def itinerary_agent(state: TravelState):
-    
+
     prompt = f"""Create ONLY the day-by-day plan for the user's request below.
     Do not include a budget summary, flight tables or general tips; those are written later.
     Keep each day to 4-6 short bullet points.
@@ -319,6 +350,7 @@ def itinerary_agent(state: TravelState):
     User Query: {state['user_query']}
     Flight Results: {state['flight_results']}
     Hotel Results: {state['hotel_results']}
+    Weather today (the trip is weeks away, so use this only as a hint of the climate; do not present it as the forecast for the trip dates): {state.get('weather_results') or 'not available'}
 
     Make the plan practical and budget aware. Do not claim a flight's arrival time is
     the departure time: use the flight data exactly as given.
@@ -447,6 +479,7 @@ graph = StateGraph(TravelState)
 graph.add_node("parse_request",parse_request)
 graph.add_node("flight_agent",flight_agent)
 graph.add_node("hotel_agent",hotel_agent)
+graph.add_node("weather_agent",weather_agent)
 graph.add_node("itinerary_agent",itinerary_agent)
 graph.add_node("budget_agent",budget_agent)
 graph.add_node("final_agent",final_agent)
@@ -454,7 +487,8 @@ graph.add_node("final_agent",final_agent)
 graph.add_edge(START,"parse_request")
 graph.add_edge("parse_request","flight_agent")
 graph.add_edge("flight_agent","hotel_agent")
-graph.add_edge("hotel_agent","itinerary_agent")
+graph.add_edge("hotel_agent","weather_agent")
+graph.add_edge("weather_agent","itinerary_agent")
 graph.add_edge("itinerary_agent","budget_agent")
 graph.add_edge("budget_agent","final_agent")
 graph.add_edge("final_agent",END)
@@ -493,6 +527,7 @@ def run_travel_agent(user_input:str, thread_id: str| None= None):
         "user_query": user_input,
         "flight_results" : "",
         "hotel_results": "",
+        "weather_results": "",
         "itinerary": "",
         "llm_calls": 0,
         "destination": "",
