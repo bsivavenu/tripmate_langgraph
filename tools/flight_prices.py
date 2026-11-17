@@ -5,6 +5,7 @@ what the planner uses for prices. Needs SERPAPI_API_KEY (free plan: 250 searches
 """
 import os
 from datetime import date, timedelta
+import time
 
 import requests
 from dotenv import load_dotenv
@@ -18,6 +19,9 @@ SERPAPI_URL = "https://serpapi.com/search.json"
 # Example travel date offset: Google Flights sells ~11 months ahead; planner rule is >= 8 weeks.
 DAYS_AHEAD = 60
 MAX_OPTIONS = 4
+CACHE_SECONDS = 6 * 60 * 60  # keep a result for 6 hours
+_cache = {}  # key -> (time saved, result text)
+
 
 
 def _fmt_duration(minutes) -> str:
@@ -68,6 +72,11 @@ def search_flight_prices(origin: str, destination: str, trip_days: int = 0, arri
 
     outbound = date.today() + timedelta(days=DAYS_AHEAD)
     ret = outbound + timedelta(days=max(trip_days, 2) - 1)
+    key = (dep_id, arr_id, outbound.isoformat(), ret.isoformat())
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < CACHE_SECONDS:
+        return hit[1]
+
     params = {
         "engine": "google_flights",
         "departure_id": dep_id,
@@ -102,7 +111,12 @@ def search_flight_prices(origin: str, destination: str, trip_days: int = 0, arri
     low = (insights.get("typical_price_range") or [])
     if len(low) == 2:
         header += f" Typical price range for this route: INR {low[0]:,}-{low[1]:,}."
-    return header + "\n" + "\n".join(lines)
+    
+    result = header + "\n" + "\n".join(lines)
+    _cache[key] = (time.time(), result)
+    
+    return result
+
 
 
 if __name__ == "__main__":
