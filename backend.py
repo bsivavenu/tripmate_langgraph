@@ -355,6 +355,7 @@ def itinerary_agent(state: TravelState):
     End EVERY day with one line in exactly this form (whole INR numbers, 0 if none):
     "Costs: hotel ₹X, meals ₹X, transport ₹X, entry/activities ₹X"
     Count the hotel on each night the traveller sleeps in a hotel, and every transport leg on the day it happens.
+    Exception: if the flight data below lists real fares, leave the flight fare OUT of the Costs lines (it is added separately). If it says fares are unavailable, include your estimated fare in transport.
     Today's date: {date.today().isoformat()}
 
 {PLANNING_RULES}
@@ -389,6 +390,11 @@ class BudgetItem(BaseModel):
 
 class BudgetItems(BaseModel):
     items: list[BudgetItem]
+    flight_total_inr: int = Field(
+        default=0,
+        description="Total INR for the flights of the fare the itinerary uses, for ALL travellers "
+                    "(listed fares are per adult). 0 if the flight data lists no fare.",
+    )
 
 
 def budget_agent(state: TravelState):
@@ -399,8 +405,13 @@ def budget_agent(state: TravelState):
             SystemMessage(content=(
                 "Read the 'Costs:' line at the end of every day and return one line item per category "
                 "per day (hotel, meals, transport, entry/activities) with its INR amount. Use the category "
-                "names Hotels, Meals, Transport, Entry fees & activities. Do not invent, merge or skip any.")),
-            HumanMessage(content=state["itinerary"]),
+                "names Hotels, Meals, Transport, Entry fees & activities. Do not invent, merge or skip any. "
+                "Do not put flight fares in the items; report them only in flight_total_inr "
+                "(the listed round-trip fare of the flight the itinerary uses, times the number of travellers).")),
+            HumanMessage(content=(
+                f"ITINERARY:\n{state['itinerary']}\n\n"
+                f"FLIGHT DATA:\n{state.get('flight_results', '')}\n\n"
+                f"USER REQUEST:\n{state['user_query']}")),
         ])
     except Exception:
         return {"budget_table": "", "budget_total": 0}
@@ -408,6 +419,9 @@ def budget_agent(state: TravelState):
     totals: dict[str, int] = {}
     for item in extracted.items:
         totals[item.category] = totals.get(item.category, 0) + max(item.amount_inr, 0)
+    # Real fares were left out of the day costs on purpose; add them here, once.
+    if "round trip INR" in state.get("flight_results", "") and extracted.flight_total_inr > 0:
+        totals["Transport"] = totals.get("Transport", 0) + extracted.flight_total_inr
     grand = sum(totals.values())
 
     rows = "\n".join(f"| {cat} | {amt:,} |" for cat, amt in totals.items())
@@ -418,7 +432,7 @@ def budget_agent(state: TravelState):
 def final_agent(state: TravelState):
     if state.get("budget_table"):
         budget_instruction = (
-            "Section 5 must contain EXACTLY this table (already computed, do not change any number), "
+            "Section 6 must contain EXACTLY this table (already computed, do not change any number), "
             "then one sentence comparing the total of "
             f"{state['budget_total']:,} INR with the user's budget:\n{state['budget_table']}\n"
             "Remove the per-day 'Costs:' lines from the itinerary section; the table replaces them. "
@@ -436,7 +450,7 @@ def final_agent(state: TravelState):
                 f" The total EXCEEDS the {limit:,} INR budget: say so clearly and suggest specific cuts."
             )
     else:
-        budget_instruction = ("Section 5: give a short budget table; label every figure 'estimate' "
+        budget_instruction = ("Section 6: give a short budget table; label every figure 'estimate' "
                               "and make sure the rows add up to the stated total.")
 
     final_prompt = f"""
@@ -457,16 +471,20 @@ For domestic trips, omit visa advice entirely.
 
     Hotels:  {state['hotel_results']}
 
-    Day-by-day plan (reuse it as section 4, do not re-plan it, but fix it if it breaks the rules above, e.g. wrong-city hotel or impossible travel timing): {state['itinerary']}
+    Weather: {state['weather_results']}
+
+    Day-by-day plan (reuse it as section 5, do not re-plan it, but fix it if it breaks the rules above, e.g. wrong-city hotel or impossible travel timing): {state['itinerary']}
 
     Format the final answer beautifully using these sections:
 
     1. Trip summary
     2. Flight information
     3. Hotel Suggestions
-    4. Day-by-Day Itinerary
-    5. Estimated Budget
-    6. Final Recommendations
+    4. weather information
+    5. Day-by-Day Itinerary
+    6. Estimated Budget
+    7. Final Recommendations
+
 
     Important:
     - Be clear and practical.
@@ -565,6 +583,7 @@ def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str
         "answer": final_answer,
         "flight_results": result.get("flight_results",""),
         "hotel_results": result.get("hotel_results",""),
+        "weather_results": result.get("weather_results",""),
         "itinerary": result.get("itinerary",""),
         "llm_calls": result.get("llm_calls",0),
     }
