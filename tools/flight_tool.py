@@ -333,12 +333,31 @@ def resolve_location_to_iata(location: str):
     return codes[0] if codes else None
 
 
+# Places where the generic lookup picks the wrong airport or finds none
+# (e.g. "Goa" matched Genoa's GOA, "Bali" matched a Cameroon airport).
+LOCATION_OVERRIDES = {
+    "goa": ["GOI"],            # Dabolim (GOA is Genoa, Italy)
+    "bali": ["DPS"],           # Denpasar
+    "kochi": ["COK"],
+    "kashmir": ["SXR"],        # Srinagar
+    "ladakh": ["IXL"],         # Leh
+    "andaman": ["IXZ"],        # Port Blair
+    "pondicherry": ["PNY"],
+    "manali": ["KUU"],         # Kullu-Manali (Bhuntar)
+    "shimla": ["SLV"],
+    "darjeeling": ["IXB"],     # Bagdogra
+}
+
+
 def resolve_location_to_iatas(location: str, limit: int = 3):
     """Like resolve_location_to_iata, but returns up to `limit` airports (busiest first).
 
     A country or metro area has several airports (Japan: HND, NRT, KIX), and a route may
     only exist between some of them, so callers should try each.
     """
+    override = LOCATION_OVERRIDES.get((location or "").strip().lower())
+    if override:
+        return override[:limit]
     for candidate in search_airports(location):
         codes = [a["iata"] for a in candidate["airports"]]
         if not codes:
