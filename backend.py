@@ -24,6 +24,7 @@ from langchain_groq import ChatGroq
 # from tools.tavily_tool import tavily_search
 from mcp_client import tavily_mcp_search, aviation_stack_mcp_call
 from tools.flight_tool import search_flights
+from tools.flight_prices import search_flight_prices
 
 
 def get_database_url():
@@ -140,6 +141,9 @@ class TravelState(TypedDict):
     budget_table: str
     budget_total: int
     budget_inr: int
+    trip_days: int
+    arrival_airport: str
+
 
 # Rules shared by the itinerary and final prompts. The flight and hotel data
 # are included further down in each prompt.
@@ -153,7 +157,7 @@ PLANNING_RULES = """Rules:
 - Suggest example travel dates at least 8 weeks after today's date.
 - The itinerary must contain exactly N days, with no extra day.
 - Do not state weekday names.
-- The flight data shows live flights near today, not schedules for future dates. Show them only as examples of airlines and flight numbers. Do not attach future dates or invent return flights.
+- Flight data, when present, lists real round-trip fares with dates. Use those fares, airlines, dates and times exactly as given (a fare covers both directions), and use those dates as the trip dates. If the flight data says fares are unavailable, give a typical round-trip fare labelled "(est.)" and do not invent flight numbers or times.
 - Never mention "provided data", "supplied plan", "the feed you provided" or similar; the user supplied only their request. Say "price not available" or "estimate" instead.
 - Only use hotels located in the city where the traveller sleeps that night. Never label a hotel as being in a different city than it really is.
 - Every place you suggest must really lie in the destination the user asked for (e.g. if they ask for Andhra Pradesh, do not include places in Telangana).
@@ -196,6 +200,14 @@ class TripRequest(BaseModel):
         default=0,
         description="The user's total budget as a whole number in INR (convert if another currency is stated); 0 if no budget is given",
     )
+    trip_days: int = Field(
+        default=0,
+        description="Total number of days of the trip (e.g. '5 day trip' -> 5); 0 if not stated",
+    )
+    arrival_airport: str = Field(
+        default="",
+        description="IATA code of the main airport the traveller flies into for this trip, e.g. 'DPS' for Bali, 'ICN' for Seoul; empty if unsure",
+    )
     budget_level: str = Field(
         description="One of: budget, mid-range, luxury. Infer from the stated budget, default mid-range."
     )
@@ -218,10 +230,12 @@ def parse_request(state: TravelState):
             "cities": [c.strip() for c in trip.cities if c.strip()][:5],
             "budget_level": trip.budget_level.strip().lower(),
             "budget_inr": max(trip.budget_inr, 0),
+            "trip_days": max(trip.trip_days, 0),
+            "arrival_airport": trip.arrival_airport.strip().upper(),
             "llm_calls": state.get("llm_calls", 0) + 1,
         }
     except Exception:
-        return {"destination": "", "budget_level": "", "origin": "", "trip_type": "single_city", "cities": [], "budget_inr": 0}
+        return {"destination": "", "budget_level": "", "origin": "", "trip_type": "single_city", "cities": [], "budget_inr": 0, "trip_days": 0,"arrival_airport": ""}
 
 
 # def flight_agent(state: TravelState):
@@ -236,76 +250,27 @@ def parse_request(state: TravelState):
 #     }
 
 
-FLIGHT_AGENT_PROMPT = """
-You are a travel flight expert.
-
-User Query:
-{query}
-
-Airport Information:
-{airport_data}
-
-Airline Information:
-{airline_data}
-
-Generate:
-
-1. Likely departure airport
-2. Likely arrival airport
-3. Airlines serving this route
-4. Typical flight duration
-5. Estimated airfare range
-6. Peak season pricing warning
-7. Booking advice
-
-Return concise travel guidance.
-"""
-
 def flight_agent(state: TravelState):
-    query = state["user_query"]
+    """Real round-trip fares from Google Flights (SerpApi). Falls back to a note that
+    makes the planner use clearly-labelled estimates."""
+    origin = state.get("origin", "")
+    destination = state.get("destination", "")
+    if state.get("trip_type") == "multi_city" and state.get("cities"):
+        destination = state["cities"][0]
 
     try:
+        flight_data = search_flight_prices(origin, destination, state.get("trip_days", 0), state.get("arrival_airport", ""))
 
-        airports = asyncio.run(
-            aviation_stack_mcp_call(
-                "list_airports"
-            )
-        )
+    except Exception:
+        flight_data = ""
 
-        airlines = asyncio.run(
-            aviation_stack_mcp_call(
-                "list_airlines"
-            )
-        )
-
-
-        prompt = FLIGHT_AGENT_PROMPT.format(
-            query=query,
-            airport_data=str(airports)[:3000],
-            airline_data=str(airlines)[:3000]
-        )
-
-        response = llm.invoke([
-            SystemMessage(
-                content="You are an expert travel flight planner."
-            ),
-            HumanMessage(content=prompt)
-        ])
-
-        flight_data = response.content
-
-    except Exception as e:
-
-        flight_data = "Flight information unavailable; plan with train/bus or typical fares marked (est.)."
+    if not flight_data:
+        flight_data = ("Flight fares unavailable for this route. Do not invent flight numbers or times; "
+                       "give a typical round-trip fare or train/bus cost labelled (est.).")
 
     return {
         "flight_results": flight_data,
-        "messages": [
-            AIMessage(
-                content="Flight recommendations generated"
-            )
-        ],
-        "llm_calls": state.get("llm_calls", 0) + 1
+        "messages": [AIMessage(content="Flight fares fetched")],
     }
     
 def hotel_agent(state: TravelState):
