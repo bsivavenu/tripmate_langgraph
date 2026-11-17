@@ -2,7 +2,7 @@
 
 Exposes two tools backed by the OpenWeatherMap API:
     - get_current_weather: live conditions for a city
-    - get_forecast: the next few 3-hour forecast entries for a city
+    - get_forecast: day-by-day forecast (up to 5 days) for a city
 The TripMate agents call them over MCP (stdio) to include real weather in
 trip plans.
 
@@ -86,31 +86,34 @@ def get_current_weather(city: str) -> dict:
 
 @mcp.tool()
 def get_forecast(city: str) -> dict:
-    """Return the next five 3-hour forecast entries (about 15 hours) for a city.
+    """Return a day-by-day forecast (up to 5 days) for a city.
 
     Args:
         city: City name, e.g. "Paris" or "Paris,FR".
 
     Returns:
-        A dict with city and a forecast list; each entry has datetime,
-        temperature_c and condition.
+        A dict with city and a forecast list; each entry has date,
+        min_c, max_c and the most common condition for that day.
     """
     data = _request_json("https://api.openweathermap.org/data/2.5/forecast", city)
 
-    # The API returns ~40 entries (5 days); keep just the first 5
-    forecast = [
-        {
-            "datetime": item["dt_txt"],
-            "temperature_c": item["main"]["temp"],
-            "condition": item["weather"][0]["description"],
-        }
-        for item in data.get("list", [])[:5]
-    ]
+    # The API returns 3-hour entries; group them by calendar day (UTC)
+    days = {}
+    for item in data["list"]:
+        days.setdefault(item["dt_txt"][:10], []).append(item)
 
-    return {
-        "city": data["city"]["name"],
-        "forecast": forecast,
-    }
+    forecast = []
+    for day, items in days.items():
+        temps = [i["main"]["temp"] for i in items]
+        conds = [i["weather"][0]["description"] for i in items]
+        forecast.append({
+            "date": day,
+            "min_c": round(min(temps), 1),
+            "max_c": round(max(temps), 1),
+            "condition": max(set(conds), key=conds.count),  # most common
+        })
+
+    return {"city": data["city"]["name"], "forecast": forecast}
 
 
 if __name__ == "__main__":

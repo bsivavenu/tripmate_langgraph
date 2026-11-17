@@ -22,7 +22,7 @@ from langchain_core.messages import (AnyMessage,
 
 from langchain_groq import ChatGroq
 # from tools.tavily_tool import tavily_search
-from mcp_client import tavily_mcp_search, aviation_stack_mcp_call, weather_now
+from mcp_client import tavily_mcp_search, aviation_stack_mcp_call, weather_now, weather_forecast
 from tools.flight_tool import search_flights
 from tools.flight_prices import search_flight_prices
 
@@ -132,6 +132,7 @@ class TravelState(TypedDict):
     flight_results : str
     hotel_results : str
     weather_results: str
+    start_date: str
     itinerary: str
     llm_calls: int
     destination: str
@@ -155,7 +156,7 @@ PLANNING_RULES = """Rules:
 - Trip length must match the user's request exactly (N days = N-1 nights unless stated otherwise).
 - Assume 1 traveller unless the user states otherwise.
 - All totals must add up and stay within the user's stated budget.
-- Suggest example travel dates at least 8 weeks after today's date.
+- Use the trip start date given below if there is one; otherwise suggest example travel dates about 8 weeks after today's date.
 - The itinerary must contain exactly N days, with no extra day.
 - Do not state weekday names.
 - Flight data, when present, lists real round-trip fares with dates. Use those fares, airlines, dates and times exactly as given (a fare covers both directions), and use those dates as the trip dates. If the flight data says fares are unavailable, give a typical round-trip fare labelled "(est.)" and do not invent flight numbers or times.
@@ -260,7 +261,8 @@ def flight_agent(state: TravelState):
         destination = state["cities"][0]
 
     try:
-        flight_data = search_flight_prices(origin, destination, state.get("trip_days", 0), state.get("arrival_airport", ""))
+        flight_data = search_flight_prices(origin, destination, state.get("trip_days", 0),
+                                           state.get("arrival_airport", ""), state.get("start_date", ""))
 
     except Exception:
         flight_data = ""
@@ -304,16 +306,26 @@ def hotel_agent(state: TravelState):
 
 
 def weather_agent(state: TravelState):
-    """Fetch today's weather for each city via our weather MCP server."""
+    """Fetch weather for each city via our weather MCP server.
+    Trip starts within ~5 days -> real day-by-day forecast; otherwise today's
+    weather as a climate hint."""
     cities = state.get("cities") or []
     if state.get("trip_type") != "multi_city" or not cities:
         cities = [state["destination"]] if state.get("destination") else []
+
+    # the free forecast API only covers 5 days ahead
+    try:
+        days_away = (date.fromisoformat(state.get("start_date") or "") - date.today()).days
+    except ValueError:
+        days_away = None
+    use_forecast = days_away is not None and 0 <= days_away <= 4
+    fetch = weather_forecast if use_forecast else weather_now
 
     async def fetch_all():
         # one call per city, run together; a failed city becomes an exception
         # object instead of crashing the whole trip plan
         return await asyncio.gather(
-            *[weather_now(city) for city in cities],
+            *[fetch(city) for city in cities],
             return_exceptions=True,
         )
 
@@ -325,8 +337,10 @@ def weather_agent(state: TravelState):
             else:
                 lines.append(result)
 
+    label = ("Forecast for the trip dates" if use_forecast
+             else "Weather today (climate hint only, not the forecast for the trip dates)")
     return {
-        "weather_results": "\n".join(lines),
+        "weather_results": f"{label}:\n" + "\n".join(lines) if lines else "",
         "messages": [
             AIMessage(content="Weather information fetched")
         ],
@@ -350,7 +364,8 @@ def itinerary_agent(state: TravelState):
     User Query: {state['user_query']}
     Flight Results: {state['flight_results']}
     Hotel Results: {state['hotel_results']}
-    Weather today (the trip is weeks away, so use this only as a hint of the climate; do not present it as the forecast for the trip dates): {state.get('weather_results') or 'not available'}
+    Trip start date: {state.get('start_date') or 'not given (suggest dates about 8 weeks from today)'}
+    Weather: {state.get('weather_results') or 'not available'}
 
     Make the plan practical and budget aware. Do not claim a flight's arrival time is
     the departure time: use the flight data exactly as given.
@@ -508,7 +523,7 @@ checkpointer.setup()
 travel_graph = graph.compile(checkpointer=checkpointer)
 
 
-def run_travel_agent(user_input:str, thread_id: str| None= None):
+def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str | None = None):
     if not thread_id:
         thread_id = f"user_{uuid.uuid4().hex}"
 
@@ -528,6 +543,7 @@ def run_travel_agent(user_input:str, thread_id: str| None= None):
         "flight_results" : "",
         "hotel_results": "",
         "weather_results": "",
+        "start_date": start_date or "",
         "itinerary": "",
         "llm_calls": 0,
         "destination": "",

@@ -34,6 +34,7 @@ template = Jinja2Templates(
 class PlanRequest(BaseModel):
     query: str
     thread_id: str | None = None
+    start_date: str | None = None  # "YYYY-MM-DD" from the date picker
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
@@ -42,7 +43,7 @@ def home(request: Request):
 @app.post("/api/plan")
 def plan(req: PlanRequest):
     try:
-        return run_travel_agent(req.query, req.thread_id)
+        return run_travel_agent(req.query, req.thread_id, req.start_date)
     except Exception as e:
         return JSONResponse({"detail": str(e)}, status_code=500)
 

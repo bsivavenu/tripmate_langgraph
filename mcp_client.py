@@ -138,9 +138,9 @@ async def weather_now(city: str) -> str:
 
 
 async def weather_forecast(city: str) -> str:
-    """Next 3-hour forecast entries, one line each."""
+    """Day-by-day forecast (up to 5 days), one line per day."""
     d = _weather_json(await weather_mcp_call("get_forecast", city))
-    lines = [f"{e['datetime']}: {e['temperature_c']}°C, {e['condition']}"
+    lines = [f"{e['date']}: {e['min_c']}-{e['max_c']}°C, {e['condition']}"
              for e in d["forecast"]]
     return f"Forecast for {d['city']}:\n" + "\n".join(lines)
 

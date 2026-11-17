@@ -8,11 +8,21 @@
   const input = document.getElementById("input");
   const sendBtn = document.getElementById("send");
   const newChatBtn = document.getElementById("new-chat");
+  const startDateInput = document.getElementById("start-date");
+  // YYYY-MM-DD in local time, n days from today
+  const isoDate = (n = 0) => {
+    const d = new Date();
+    d.setDate(d.getDate() + n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  startDateInput.min = isoDate(0);      // no past dates
+  startDateInput.value = isoDate(60);   // pre-filled: same ~8 weeks default the backend uses
 
-  // Mirrors the graph in backend.py: flight -> hotel -> itinerary -> final.
+  // Mirrors the graph in backend.py: flight -> hotel -> weather -> itinerary -> final.
   const STEPS = [
     "Searching live flights",
     "Finding hotels",
+    "Checking the weather",
     "Building your itinerary",
     "Writing the final plan",
   ];
@@ -117,7 +127,11 @@
       const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, thread_id: threadId }),
+        body: JSON.stringify({
+          query,
+          thread_id: threadId,
+          start_date: startDateInput.value || null,
+        }),
       });
       if (!res.ok) {
         let detail = `Request failed (${res.status})`;

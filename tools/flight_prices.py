@@ -53,7 +53,8 @@ def _describe_option(option: dict) -> str:
     )
 
 
-def search_flight_prices(origin: str, destination: str, trip_days: int = 0, arrival_iata: str = "") -> str:
+def search_flight_prices(origin: str, destination: str, trip_days: int = 0,
+                         arrival_iata: str = "", start_date: str = "") -> str:
     """Return a text block of real round-trip fares, or "" when nothing usable was found."""
     api_key = os.getenv("SERPAPI_API_KEY")
     if not api_key:
@@ -70,7 +71,9 @@ def search_flight_prices(origin: str, destination: str, trip_days: int = 0, arri
         return ""
     dep_id, arr_id = dep_codes[0], arr_codes[0]
 
-    outbound = date.today() + timedelta(days=DAYS_AHEAD)
+    # the traveller's chosen date, else the default ~8 weeks ahead
+    outbound = (date.fromisoformat(start_date) if start_date
+                else date.today() + timedelta(days=DAYS_AHEAD))
     ret = outbound + timedelta(days=max(trip_days, 2) - 1)
     key = (dep_id, arr_id, outbound.isoformat(), ret.isoformat())
     hit = _cache.get(key)

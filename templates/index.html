@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=2" />
 </head>
 <body>
   <div class="bg" aria-hidden="true">
@@ -24,7 +24,7 @@
 
   <main class="chat" id="chat" aria-live="polite">
     <section class="welcome" id="welcome">
-      <span class="pill">✨ Powered by a multi-agent LangGraph workflow · Live on Render</span>
+      <span class="pill">✨ Powered by a multi-agent LangGraph and MCP · Live on Render</span>
       <h1>Plan your next trip in <span class="grad">seconds</span></h1>
       <p class="lead">Tell TripMate where you want to go and your budget. Our AI agents search flights, find hotels and build a day-by-day itinerary for you.</p>
 
@@ -50,11 +50,14 @@
         aria-label="Trip request"></textarea>
       <button id="send" type="submit" aria-label="Plan trip"><span>Plan trip</span> →</button>
     </div>
+    <label class="date-pick">Trip start date
+      <input type="date" id="start-date">
+    </label>
     <p class="hint">Press Enter to send · Shift+Enter for a new line · AI can make mistakes, verify prices before booking</p>
   </form>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
-  <script src="/static/script.js"></script>
+  <script src="/static/script.js?v=3"></script>
 </body>
 </html>
