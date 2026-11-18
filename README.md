@@ -179,7 +179,7 @@ The container listens on `$PORT` (default `8000`). The Dockerfile pre-downloads 
 
 ### Deploy (Render)
 
-Deployed as a Docker web service from this repo's `Dockerfile`. Set the same variables as in `.env` in the service's *Environment* tab (use Render's **internal** database URL when in the same region). Auto-deploy follows the branch set in Render, so **check which branch Render tracks before merging**.
+Deployed as a Docker web service from this repo's `Dockerfile`. Set the same variables as in `.env` in the service's *Environment* tab (use Render's **internal** database URL when in the same region). The live demo's Render service tracks its own branch, which is separate from this one, so pushing `multi-agent-with-mcp` does not change the live site.
 
 ---
 
@@ -229,7 +229,6 @@ LangGraph + LangChain · Groq or OpenAI · MCP (`langchain-mcp-adapters`, `mcp` 
 - **Return flight times are not listed** in the fare data, so the plan says so.
 - **A plan takes up to a minute**: live searches plus several LLM calls in sequence.
 - **Free-tier quotas** (Groq, Tavily, SerpApi 250/month, OpenWeather) can rate-limit heavy use. Fares are cached in memory for 6 hours to save SerpApi quota; the cache is lost on restart.
-- **Stale file:** `requirements.txt` is out of date (no MCP packages). Use `pyproject.toml` / `uv.lock`.
 
 ## Next steps
 

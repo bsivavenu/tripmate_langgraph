@@ -22,8 +22,13 @@ COPY . .
 RUN useradd --create-home appuser
 USER appuser
 
-# The app launches the AviationStack MCP server with `uvx` (stdio subprocess).
-# Pre-download it now so containers start fast and need no write access at runtime.
+# mcp_client.py starts three MCP servers as/for tools:
+#   - Tavily: remote (HTTP), nothing to install
+#   - weather: our own custom_weather_mcp_server.py, launched with this image's Python
+#     (/app/.venv/bin/python via sys.executable), so it needs no extra setup
+#   - AviationStack: launched with `uvx` as a stdio subprocess
+# client.get_tools() starts ALL of them, so pre-download the AviationStack one now:
+# containers then start fast and need no write access at runtime.
 # aviationstack-mcp needs Python >= 3.13 (the app itself runs on 3.12), so uv downloads
 # a managed 3.13 just for that tool; both caches live in appuser's home.
 ENV UV_CACHE_DIR=/home/appuser/.cache/uv \
