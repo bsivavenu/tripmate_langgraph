@@ -6,9 +6,13 @@ It is a **multi-step LangGraph workflow** served by **FastAPI**, with a small ch
 
 **🌐 Live demo: <https://tripmate-langgraph.onrender.com>** (free tier: the first load after idle can take ~1 minute)
 
-![TripMate architecture](docs/architecture.png)
-
-> The diagram is `docs/architecture.svg` (editable) rendered to `docs/architecture.png`.
+<p align="center">
+  <a href="docs/architecture.png">
+    <img src="docs/architecture.png" alt="TripMate architecture diagram" width="100%">
+  </a>
+  <br>
+  <sub>Click the diagram to open it full size. Source: <code>docs/architecture.svg</code> (editable), rendered to <code>docs/architecture.png</code>.</sub>
+</p>
 
 ---
 
@@ -86,6 +90,7 @@ flowchart LR
 ├── test.py                        Prints every tool the MCP client can see (a quick MCP check)
 ├── mcp_client_test.py             Old scratch file from when MCP was first tried; safe to ignore
 ├── main.py                        Empty `uv init` stub; safe to ignore
+├── .env.example                   Template for your .env (copy it, fill in your keys)
 ├── Dockerfile                     Container image (also pre-downloads the AviationStack MCP)
 └── pyproject.toml / uv.lock       Dependencies (source of truth)
 ```
@@ -130,7 +135,11 @@ The planner resolves city names to airport codes with `airportsdata`, and some n
 
 ## Configuration
 
-Create a `.env` in the project root (never commit it; it is in `.gitignore`).
+Copy the template and fill in your keys (never commit `.env`; it is in `.gitignore`):
+
+```bash
+cp .env.example .env
+```
 
 | Variable | Needed? | Used for |
 |---|---|---|
