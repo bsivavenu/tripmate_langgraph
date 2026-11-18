@@ -221,3 +221,6 @@ __marimo__/
 
 # Playwright MCP browser artifacts
 .playwright-mcp/
+
+# macOS
+.DS_Store
