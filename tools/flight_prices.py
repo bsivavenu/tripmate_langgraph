@@ -25,12 +25,16 @@ _cache = {}  # key -> (time saved, result text)
 
 
 def _fmt_duration(minutes) -> str:
+    """Minutes as '13h 05m' ('?' if unknown)."""
     if not minutes:
         return "?"
     return f"{minutes // 60}h {minutes % 60:02d}m"
 
 
 def _describe_option(option: dict) -> str:
+    """One Google Flights option as a single text line: airlines, flight numbers, times, stops,
+    duration and round-trip price in INR.
+    """
     legs = option.get("flights") or []
     if not legs:
         return ""

@@ -1,3 +1,6 @@
+"""FastAPI app: serves the web UI and exposes POST /api/plan, which runs the LangGraph pipeline in backend.py.
+"""
+
 from pathlib import Path
 import uvicorn
 
@@ -38,10 +41,15 @@ class PlanRequest(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
+    """Serve the single-page UI (templates/index.html)."""
     return template.TemplateResponse(request, "index.html")
 
 @app.post("/api/plan")
 def plan(req: PlanRequest):
+    """Run the TripMate graph for one request and return the plan.
+
+    Any error is returned as a 500 with {"detail": ...}.
+    """
     try:
         return run_travel_agent(req.query, req.thread_id, req.start_date)
     except Exception as e:

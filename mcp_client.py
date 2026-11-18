@@ -1,3 +1,12 @@
+"""MCP client: one MultiServerMCPClient that talks to three MCP servers.
+
+  - tavily        remote server over HTTP (hotel search)
+  - aviationstack third-party server run with uvx over stdio (connected, not used by the graph)
+  - weather       our own server, custom_weather_mcp_server.py, run over stdio
+
+Helpers below wrap the tools so the LangGraph steps in backend.py can call them.
+"""
+
 import os
 import sys
 import json
@@ -47,6 +56,7 @@ client = MultiServerMCPClient(
 )
 
 async def get_all_tools():
+    """Print the name of every tool all MCP servers expose (used by test.py to check the connections)."""
     tools = await client.get_tools()
     print("available tools")
     for tool in tools:
@@ -56,6 +66,10 @@ search_tool = None
 avaition_tool = {}
 
 async def intialize_mcp():
+    """Load the MCP tools once: the Tavily search tool, and every other tool in a dict.
+
+    Note: client.get_tools() starts all three servers. (The name has a typo; kept so imports keep working.)
+    """
     global search_tool
     global avaition_tool
 
@@ -74,6 +88,7 @@ async def intialize_mcp():
 
 
 async def tavily_mcp_search(query:str):
+    """Search the web with the Tavily MCP tool (top 5 results) and return compact numbered text for prompts."""
     await intialize_mcp()
     result = await search_tool.ainvoke(
         {
@@ -106,6 +121,10 @@ async def aviation_stack_mcp_call(
     tool_name : str,
     tool_args: dict = None
     ):
+    """Call one AviationStack MCP tool by name with the given arguments.
+
+    Connected for learning, but not used by the graph (see README).
+    """
     
     tools = await client.get_tools()
     tool =  next(tool for tool in tools if tool.name== tool_name)

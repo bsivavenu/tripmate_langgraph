@@ -1,3 +1,10 @@
+"""Airport and place resolution.
+
+Turns names like 'Seoul', 'Japan' or 'Goa' into IATA airport codes (resolve_location_to_iatas), built on
+airportsdata and pycountry. LOCATION_OVERRIDES fixes places the generic lookup gets wrong (Goa -> GOI).
+Also holds the legacy AviationStack search (search_flights), which the graph no longer uses.
+"""
+
 import os
 from dotenv import load_dotenv
 import re
@@ -45,6 +52,7 @@ _EXTRA_COUNTRY_ALIASES = {
 
 
 def _build_country_aliases():
+    """Map the name variants of every country (official, common, alpha-2/3 codes) to its ISO alpha-2 code."""
     aliases = {}
     for c in pycountry.countries:
         code = c.alpha_2
@@ -128,6 +136,7 @@ def _fallback_major(country_code):
 
 
 def _build_country_airports():
+    """For each country, the list of major airport codes that really exist in the airport database."""
     result = {}
     for code in {v["country"] for v in AIRPORTS.values()}:
         codes = _MAJOR_AIRPORTS.get(code) or _fallback_major(code)
@@ -372,6 +381,10 @@ def resolve_location_to_iatas(location: str, limit: int = 3):
 
 
 def _is_known_place(phrase: str) -> bool:
+    """True if the phrase is a real place name (city, metro area or country) and not a common word.
+
+    Very short names are rejected, and so is 'us'.
+    """
     if phrase in _METRO_INDEX or phrase in _CITY_INDEX:
         return len(phrase) >= 3
     if phrase in _EXTRA_COUNTRY_ALIASES:
@@ -500,6 +513,7 @@ def parse_route_options(query: str):
 
 
 def format_flight(flight: dict):
+    """Format one AviationStack live-flight record as readable text (legacy, used by search_flights)."""
     airline = (flight.get("airline") or {}).get("name") or "Unknown airline"
     flight_number = (flight.get("flight") or {}).get("iata") or "Unknown flight number"
     status = flight.get("flight_status") or "Unknown"
@@ -557,6 +571,11 @@ def format_flights_compact(flights: list, max_flights: int = 5):
 
 @traceable
 def search_flights(query: str, limit: int = 10, compact: bool = False):
+    """Legacy AviationStack lookup: parse the route from free text and list live flights for it.
+
+    Not used by the graph any more (real fares come from flight_prices.py). Tries at most 1 departure x 2
+    arrival airports to protect the API quota.
+    """
     if not api_key:
         return (
             "Flight API error: AVIATIONSTACK_API_KEY is missing.\n"
@@ -619,6 +638,7 @@ def search_flights(query: str, limit: int = 10, compact: bool = False):
 
 
 def _route_text(dep_iata, arr_iata):
+    """'HYD to ICN', 'from HYD', 'to ICN' or '' depending on which airports are known."""
     if dep_iata and arr_iata:
         return f"{dep_iata} to {arr_iata}"
     if dep_iata:

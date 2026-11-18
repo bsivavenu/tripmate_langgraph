@@ -1,3 +1,11 @@
+"""TripMate core: the LangGraph pipeline.
+
+parse_request -> flight_agent -> hotel_agent -> weather_agent -> itinerary_agent -> budget_agent -> final_agent
+
+All steps share one TravelState. State is checkpointed to PostgreSQL per thread_id. Entry point:
+run_travel_agent(). See README.md for the architecture and the diagram in docs/.
+"""
+
 import os
 import asyncio
 from dotenv import load_dotenv
@@ -28,6 +36,7 @@ from tools.flight_prices import search_flight_prices
 
 
 def get_database_url():
+    """Read DATABASE_URL from .env and make sure it has sslmode=require (needed by hosted Postgres such as Render)."""
     database_url = os.getenv("DATABASE_URL")
 
     if not database_url:
@@ -181,6 +190,7 @@ MULTI_CITY_RULES = """Trip shape: multi-city route. Do NOT use one base city wit
 
 
 def trip_shape_rules(state: "TravelState") -> str:
+    """Prompt rules for the trip shape: one base city with day trips, or a route through state['cities']."""
     if state.get("trip_type") == "multi_city":
         return MULTI_CITY_RULES + "Cities to cover: " + ", ".join(state.get("cities") or []) + "\n"
     return SINGLE_CITY_RULES
@@ -277,6 +287,7 @@ def flight_agent(state: TravelState):
     }
     
 def hotel_agent(state: TravelState):
+    """Graph step 3: hotel search with Tavily (through MCP), one search per city for multi-city trips. Writes hotel_results."""
     destination = state.get("destination")
     level = state.get("budget_level") or "mid-range"
     cities = state.get("cities") or []
@@ -348,6 +359,11 @@ def weather_agent(state: TravelState):
 
 
 def itinerary_agent(state: TravelState):
+    """Graph step 5: the strong LLM writes the day-by-day plan.
+
+    Each day ends with a 'Costs:' line that budget_agent reads. Real flight fares are left out of those
+    lines on purpose (budget_agent adds them). Writes itinerary.
+    """
 
     prompt = f"""Create ONLY the day-by-day plan for the user's request below.
     Do not include a budget summary, flight tables or general tips; those are written later.
@@ -430,6 +446,9 @@ def budget_agent(state: TravelState):
 
 
 def final_agent(state: TravelState):
+    """Graph step 7: the strong LLM writes the final 7-section answer from everything collected so far,
+    using the budget table computed by budget_agent. The answer is the last message in the state.
+    """
     if state.get("budget_table"):
         budget_instruction = (
             "Section 6 must contain EXACTLY this table (already computed, do not change any number), "
@@ -542,6 +561,11 @@ travel_graph = graph.compile(checkpointer=checkpointer)
 
 
 def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str | None = None):
+    """Entry point used by app.py: run the whole graph for one request.
+
+    Creates a thread_id if none is given (it keys the saved state in Postgres). start_date is optional,
+    'YYYY-MM-DD'. Returns the final answer plus the intermediate results.
+    """
     if not thread_id:
         thread_id = f"user_{uuid.uuid4().hex}"
 

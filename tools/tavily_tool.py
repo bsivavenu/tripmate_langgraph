@@ -1,3 +1,6 @@
+"""Older direct Tavily client. Replaced by the Tavily MCP server (see mcp_client.py); kept for reference.
+"""
+
 from tavily import TavilyClient
 import os
 from dotenv import load_dotenv
@@ -7,6 +10,7 @@ load_dotenv()
 client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 @traceable
 def tavily_search(query):
+    """Search with the Tavily client directly and return the top 5 results as numbered text."""
     response = client.search(
         query = query, 
         max_results = 5
