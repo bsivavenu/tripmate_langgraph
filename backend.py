@@ -464,16 +464,46 @@ def parse_request(state: TravelState):
         return {"destination": "", "budget_level": "", "origin": "", "trip_type": "single_city", "cities": [], "budget_inr": 0, "trip_days": 0,"arrival_airport": ""}
 
 
-# def flight_agent(state: TravelState):
-#     query = state["user_query"]
-#     flight_data = aviation_stack_mcp_call(query, compact=True)
+# =========================
+# Guardrail blocked response
+# =========================
+def guardrail_blocked_agent(state: TravelState):
+    """Final step for a request the input guardrail blocked: return the reason as the answer."""
+    reason = state.get("final_response") or state.get("guardrail_reason") or (
+        "This request was blocked by the travel input guardrail."
+    )
+    return {
+        "final_response": reason,
+        "messages": [AIMessage(content=reason)],
+    }
 
-#     return {
-#         "flight_results": flight_data,
-#         "messages": [
-#             AIMessage(content="Flight results fetched.")
-#         ],
-#     }
+
+# =========================
+# Flight Agent - original behavior kept
+# =========================
+FLIGHT_AGENT_PROMPT = """
+You are a travel flight expert.
+
+User Query:
+{query}
+
+Airport Information:
+{airport_data}
+
+Airline Information:
+{airline_data}
+
+Generate:
+1. Likely departure airport
+2. Likely arrival airport
+3. Airlines serving this route
+4. Typical flight duration
+5. Estimated airfare range
+6. Peak season pricing warning
+7. Booking advice
+
+Return concise travel guidance.
+"""
 
 
 def flight_agent(state: TravelState):
@@ -506,21 +536,28 @@ def hotel_agent(state: TravelState):
     level = state.get("budget_level") or "mid-range"
     cities = state.get("cities") or []
 
-    if state.get("trip_type") == "multi_city" and cities:
-        # one search per stop, run together, so every city has its own hotel data
-        async def search_all():
-            return await asyncio.gather(*[
-                tavily_mcp_search(f"best {level} hotels in {city} with price per night")
-                for city in cities
-            ])
-        per_city = asyncio.run(search_all())
-        hotel_results = "\n\n".join(f"### Hotels in {c}\n{r}" for c, r in zip(cities, per_city))
-    else:
-        if destination:
-            query = f"best {level} hotels in {destination} with price per night"
-        else:  # parsing failed: fall back to the raw request
-            query = f"Best hotels for {state['user_query']}"
-        hotel_results = asyncio.run(tavily_mcp_search(query))
+    try:
+        if state.get("trip_type") == "multi_city" and cities:
+            # one search per stop, run together, so every city has its own hotel data
+            async def search_all():
+                return await asyncio.gather(*[
+                    tavily_mcp_search(f"best {level} hotels in {city} with price per night")
+                    for city in cities
+                ])
+            per_city = asyncio.run(search_all())
+            hotel_results = "\n\n".join(f"### Hotels in {c}\n{r}" for c, r in zip(cities, per_city))
+        else:
+            if destination:
+                query = f"best {level} hotels in {destination} with price per night"
+            else:  # parsing failed: fall back to the raw request
+                query = f"Best hotels for {state['user_query']}"
+            hotel_results = asyncio.run(tavily_mcp_search(query))
+    except Exception as exc:
+        # Tavily/MCP down: log it and let the planner continue with clearly-labelled general advice
+        print(f"HOTEL AGENT MCP ERROR: {type(exc).__name__}: {exc}", flush=True)
+        hotel_results = ("Live hotel search is temporarily unavailable. Give general accommodation "
+                         "and neighbourhood guidance for the destination and clearly label it as "
+                         "non-live advice (est.). Do not invent hotel names or prices.")
 
     return {
         "hotel_results": hotel_results,
@@ -556,7 +593,13 @@ def weather_agent(state: TravelState):
 
     lines = []
     if cities:
-        for city, result in zip(cities, asyncio.run(fetch_all())):
+        try:
+            results = asyncio.run(fetch_all())
+        except Exception as exc:
+            # weather MCP server failed to start/connect: log it, mark every city unavailable
+            print(f"WEATHER AGENT MCP ERROR: {type(exc).__name__}: {exc}", flush=True)
+            results = [exc] * len(cities)
+        for city, result in zip(cities, results):
             if isinstance(result, Exception):
                 lines.append(f"{city}: weather not available")
             else:
@@ -751,6 +794,7 @@ graph.add_node("weather_agent",weather_agent)
 graph.add_node("itinerary_agent",itinerary_agent)
 graph.add_node("budget_agent",budget_agent)
 graph.add_node("final_agent",final_agent)
+graph.add_node("guardrail_blocked_agent",guardrail_blocked_agent)
 
 # Fixed order the steps run in. The supervisor decides WHICH of them run; this decides the order.
 # (budget_agent stays after itinerary_agent because it reads the itinerary's cost lines.)
@@ -759,7 +803,7 @@ PIPELINE = ["parse_request", "flight_agent", "hotel_agent", "weather_agent", "it
 
 def route_after_supervisor(state: TravelState):
     """Guardrail result: a blocked request ends the run, an allowed one continues."""
-    return "parse_request" if state.get("guardrail_allowed", True) else END
+    return "parse_request" if state.get("guardrail_allowed", True) else "guardrail_blocked_agent"
 
 
 def next_step(current: str):
@@ -776,8 +820,9 @@ def next_step(current: str):
 graph.add_edge(START,"supervisor_agent")
 graph.add_conditional_edges(
     "supervisor_agent", route_after_supervisor,
-    {"parse_request": "parse_request", END: END},
+    {"parse_request": "parse_request", "guardrail_blocked_agent": "guardrail_blocked_agent"},
 )
+graph.add_edge("guardrail_blocked_agent", END)
 for _node in PIPELINE:
     _targets = PIPELINE[PIPELINE.index(_node) + 1:] + ["final_agent"]
     graph.add_conditional_edges(_node, next_step(_node), {t: t for t in _targets})
