@@ -7,15 +7,17 @@ run_travel_agent(). See README.md for the architecture and the diagram in docs/.
 """
 
 import os
+import json
+import uuid
 import asyncio
+import operator
+from datetime import date
+from typing import Any, TypedDict, Annotated
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from typing import TypedDict, Annotated
-import operator
-import uuid
-from datetime import date
 import psycopg
 from psycopg.rows import dict_row
 
@@ -30,8 +32,7 @@ from langchain_core.messages import (AnyMessage,
 
 from langchain_groq import ChatGroq
 # from tools.tavily_tool import tavily_search
-from mcp_client import tavily_mcp_search, aviation_stack_mcp_call, weather_now, weather_forecast
-from tools.flight_tool import search_flights
+from mcp_client import tavily_mcp_search, weather_now, weather_forecast
 from tools.flight_prices import search_flight_prices
 
 
@@ -138,11 +139,14 @@ def invoke_llm(messages):
 class TravelState(TypedDict):
     messages: Annotated[list[AnyMessage], operator.add]
     user_query : str
+    
     flight_results : str
     hotel_results : str
     weather_results: str
-    start_date: str
     itinerary: str
+
+    start_date: str
+    
     llm_calls: int
     destination: str
     budget_level: str
@@ -154,6 +158,76 @@ class TravelState(TypedDict):
     budget_inr: int
     trip_days: int
     arrival_airport: str
+
+    # Supervisor + guardrail state
+    guardrail_allowed: bool
+    guardrail_reason: str
+    selected_agents: list[str]
+    trip_constraints: dict[str, Any]
+    supervisor_reasoning: str
+
+    # New budget + HITL state
+    budget_results: str
+    approval_request: str
+    approved: bool
+    human_feedback: str
+    final_response: str
+
+
+# =========================
+# Shared helpers
+# =========================
+KNOWN_AGENTS = {
+    "flight_agent",
+    "hotel_agent",
+    "weather_agent",
+    "budget_agent",
+    "itinerary_agent",
+}
+
+
+AGENT_ORDER = [
+    "flight_agent",
+    "hotel_agent",
+    "weather_agent",
+    "budget_agent",
+    "itinerary_agent",
+]
+
+
+def _llm_text(system_prompt: str, user_prompt: str) -> str:
+    """One plain LLM call on the fast (cheap) model; used for the guardrail and the supervisor."""
+    response = fast_llm.invoke(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+    )
+    return str(response.content)
+
+
+
+def _json_from_llm(text: str) -> dict[str, Any]:
+    """Extract the first complete JSON object returned by the model."""
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("The model did not return a JSON object.")
+
+    return json.loads(text[start : end + 1])
+
+
+def _empty_constraints() -> dict[str, Any]:
+    """Blank trip constraints, the shape the supervisor fills in."""
+    return {
+        "destination": "",
+        "origin": "",
+        "duration": "",
+        "budget": "",
+        "travel_style": "",
+        "special_preferences": [],
+    }
 
 
 # Rules shared by the itinerary and final prompts. The flight and hotel data
@@ -223,6 +297,146 @@ class TripRequest(BaseModel):
     budget_level: str = Field(
         description="One of: budget, mid-range, luxury. Infer from the stated budget, default mid-range."
     )
+
+
+# =========================
+# Supervisor Agent + Input Guardrail
+# =========================
+def supervisor_agent(state: TravelState):
+    """Graph entry. (1) Input guardrail: block requests that are not about travel.
+    (2) Supervisor: choose which specialist agents this request needs.
+
+    Writes guardrail_allowed / guardrail_reason, selected_agents, trip_constraints and
+    supervisor_reasoning. A blocked request also gets final_response and ends the run.
+    Both LLM steps fail open/safe: on any error the request is allowed and the full workflow runs.
+    """
+    query = state["user_query"]
+    llm_calls = state.get("llm_calls", 0)
+
+    guardrail_prompt = f"""
+Determine whether the following request belongs to travel planning or travel
+information. Valid requests can include destinations, flights, hotels, weather,
+budgets, visas, transportation, sightseeing, food, packing, or itineraries.
+
+Block clearly unrelated requests and requests asking for harmful or illegal
+instructions. Do not block a valid travel request merely because some details
+are missing.
+
+Return strict JSON only:
+{{
+  "allowed": true,
+  "reason": ""
+}}
+
+User request:
+{query}
+"""
+
+    # Fail open on parser/model errors so a temporary JSON-format issue does not
+    # break the original travel-planning behavior.
+    try:
+        guardrail_raw = _llm_text(
+            "You are the input guardrail for a travel-planning application. "
+            "Return strict JSON only.",
+            guardrail_prompt,
+        )
+        guardrail_result = _json_from_llm(guardrail_raw)
+        allowed = bool(guardrail_result.get("allowed", True))
+        guardrail_reason = str(guardrail_result.get("reason", "")).strip()
+        llm_calls += 1
+    except Exception as exc:
+        print(f"Guardrail fallback used: {exc}")
+        allowed = True
+        guardrail_reason = "Guardrail validation fallback allowed the request."
+
+    if not allowed:
+        reason = guardrail_reason or (
+            "TripMate AI can only help with travel-planning requests. "
+            "Please ask about a destination, flight, hotel, weather, budget, "
+            "or itinerary."
+        )
+        return {
+            "guardrail_allowed": False,
+            "guardrail_reason": reason,
+            "selected_agents": [],
+            "trip_constraints": _empty_constraints(),
+            "supervisor_reasoning": reason,
+            "final_response": reason,
+            "messages": [AIMessage(content=f"Guardrail blocked request: {reason}")],
+            "llm_calls": llm_calls,
+        }
+
+    supervisor_prompt = f"""
+You are the supervisor of a multi-agent travel-planning system.
+Choose only the specialist agents needed for the request.
+
+Available agents:
+- flight_agent: flights, airports, airlines, routes, airfare, or booking advice
+- hotel_agent: hotels, accommodation, neighborhoods, or places to stay
+- weather_agent: weather, climate, season, forecast, or packing advice
+- budget_agent: cost, affordability, price limits, or budget feasibility
+- itinerary_agent: creates the integrated travel plan and must always be included
+
+Return strict JSON only using this schema:
+{{
+  "selected_agents": ["flight_agent", "hotel_agent", "weather_agent", "budget_agent", "itinerary_agent"],
+  "trip_constraints": {{
+    "destination": "",
+    "origin": "",
+    "duration": "",
+    "budget": "",
+    "travel_style": "",
+    "special_preferences": []
+  }},
+  "reasoning": ""
+}}
+
+User request:
+{query}
+"""
+
+    try:
+        supervisor_raw = _llm_text(
+            "You route work to travel specialist agents. Return strict JSON only.",
+            supervisor_prompt,
+        )
+        parsed = _json_from_llm(supervisor_raw)
+        requested_agents = parsed.get("selected_agents", [])
+        selected_agents = [
+            name for name in AGENT_ORDER
+            if name in requested_agents and name in KNOWN_AGENTS
+        ]
+
+        # The itinerary agent integrates whichever specialist results were selected.
+        if "itinerary_agent" not in selected_agents:
+            selected_agents.append("itinerary_agent")
+
+        constraints = _empty_constraints()
+        parsed_constraints = parsed.get("trip_constraints", {})
+        if isinstance(parsed_constraints, dict):
+            constraints.update(parsed_constraints)
+
+        reasoning = str(parsed.get("reasoning", "")).strip()
+        llm_calls += 1
+    except Exception as exc:
+        print(f"Supervisor fallback used: {exc}")
+        # Original workflow behavior is preserved as the fallback.
+        selected_agents = AGENT_ORDER.copy()
+        constraints = _empty_constraints()
+        reasoning = (
+            "Supervisor parsing failed, so the original full travel workflow "
+            "was selected as a safe fallback."
+        )
+
+    return {
+        "guardrail_allowed": True,
+        "guardrail_reason": guardrail_reason,
+        "selected_agents": selected_agents,
+        "trip_constraints": constraints,
+        "supervisor_reasoning": reasoning,
+        "messages": [AIMessage(content="Supervisor created the agent plan.")],
+        "llm_calls": llm_calls,
+    }
 
 
 def parse_request(state: TravelState):
@@ -508,6 +722,7 @@ For domestic trips, omit visa advice entirely.
     Important:
     - Be clear and practical.
     - If flight prices are unavailable, say so briefly in the flight section.
+    - A specialist the supervisor did not select leaves its data above empty; for that section write one line, "Not requested", instead of inventing content.
     - Keep the response useful for real travel planning.
     """
 
@@ -528,6 +743,7 @@ For domestic trips, omit visa advice entirely.
 graph = StateGraph(TravelState)
 
 
+graph.add_node("supervisor_agent",supervisor_agent)
 graph.add_node("parse_request",parse_request)
 graph.add_node("flight_agent",flight_agent)
 graph.add_node("hotel_agent",hotel_agent)
@@ -536,13 +752,35 @@ graph.add_node("itinerary_agent",itinerary_agent)
 graph.add_node("budget_agent",budget_agent)
 graph.add_node("final_agent",final_agent)
 
-graph.add_edge(START,"parse_request")
-graph.add_edge("parse_request","flight_agent")
-graph.add_edge("flight_agent","hotel_agent")
-graph.add_edge("hotel_agent","weather_agent")
-graph.add_edge("weather_agent","itinerary_agent")
-graph.add_edge("itinerary_agent","budget_agent")
-graph.add_edge("budget_agent","final_agent")
+# Fixed order the steps run in. The supervisor decides WHICH of them run; this decides the order.
+# (budget_agent stays after itinerary_agent because it reads the itinerary's cost lines.)
+PIPELINE = ["parse_request", "flight_agent", "hotel_agent", "weather_agent", "itinerary_agent", "budget_agent"]
+
+
+def route_after_supervisor(state: TravelState):
+    """Guardrail result: a blocked request ends the run, an allowed one continues."""
+    return "parse_request" if state.get("guardrail_allowed", True) else END
+
+
+def next_step(current: str):
+    """Router for one node: the next step in PIPELINE that the supervisor selected, else final_agent."""
+    def router(state: TravelState):
+        selected = state.get("selected_agents") or AGENT_ORDER
+        for name in PIPELINE[PIPELINE.index(current) + 1:]:
+            if name in selected:
+                return name
+        return "final_agent"
+    return router
+
+
+graph.add_edge(START,"supervisor_agent")
+graph.add_conditional_edges(
+    "supervisor_agent", route_after_supervisor,
+    {"parse_request": "parse_request", END: END},
+)
+for _node in PIPELINE:
+    _targets = PIPELINE[PIPELINE.index(_node) + 1:] + ["final_agent"]
+    graph.add_conditional_edges(_node, next_step(_node), {t: t for t in _targets})
 graph.add_edge("final_agent",END)
 
 
@@ -596,11 +834,21 @@ def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str
         "budget_table": "",
         "budget_total": 0,
         "budget_inr": 0,
+        "guardrail_allowed": True,
+        "guardrail_reason": "",
+        "selected_agents": [],
+        "trip_constraints": {},
+        "supervisor_reasoning": "",
+        "final_response": "",
     },
     config=config
     )
 
-    final_answer = result["messages"][-1].content
+    # A request blocked by the input guardrail has no itinerary: its message is final_response.
+    if result.get("guardrail_allowed") is False:
+        final_answer = result.get("final_response", "")
+    else:
+        final_answer = result["messages"][-1].content
 
     return {
         "thread_id": thread_id,
@@ -610,4 +858,7 @@ def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str
         "weather_results": result.get("weather_results",""),
         "itinerary": result.get("itinerary",""),
         "llm_calls": result.get("llm_calls",0),
+        "guardrail_allowed": result.get("guardrail_allowed", True),
+        "selected_agents": result.get("selected_agents", []),
+        "supervisor_reasoning": result.get("supervisor_reasoning", ""),
     }
