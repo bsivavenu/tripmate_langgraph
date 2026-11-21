@@ -10,6 +10,7 @@ import os
 import json
 import uuid
 import asyncio
+import threading
 import operator
 from datetime import date
 from typing import Any, TypedDict, Annotated
@@ -165,6 +166,7 @@ class TravelState(TypedDict):
     # Supervisor + guardrail state
     guardrail_allowed: bool
     guardrail_reason: str
+    needs_clarification: bool
     selected_agents: list[str]
     trip_constraints: dict[str, Any]
     supervisor_reasoning: str
@@ -174,6 +176,7 @@ class TravelState(TypedDict):
     approval_request: str
     approved: bool
     human_feedback: str
+    feedback_history: list[str]
     final_response: str
 
 
@@ -303,15 +306,14 @@ class TripRequest(BaseModel):
 
 
 # =========================
-# Supervisor Agent + Input Guardrail
+# Input Guardrail (first node)
 # =========================
-def supervisor_agent(state: TravelState):
-    """Graph entry. (1) Input guardrail: block requests that are not about travel.
-    (2) Supervisor: choose which specialist agents this request needs.
+def input_guardrail_agent(state: TravelState):
+    """Graph entry. Block requests that are not about planning a trip.
 
-    Writes guardrail_allowed / guardrail_reason, selected_agents, trip_constraints and
-    supervisor_reasoning. A blocked request also gets final_response and ends the run.
-    Both LLM steps fail open/safe: on any error the request is allowed and the full workflow runs.
+    Writes guardrail_allowed / guardrail_reason. A blocked request also gets final_response
+    (the reason shown to the user) and goes to reply_agent, so it never reaches the supervisor.
+    Fails open: if the guardrail call itself errors, the request is allowed.
     """
     query = state["user_query"]
     llm_calls = state.get("llm_calls", 0)
@@ -323,8 +325,8 @@ a trip, budgets, visas, transportation, sightseeing, food, packing, or itinerari
 
 Block general-knowledge questions even if they mention a place (for example
 "what is the capital of Telangana", "who is the CM of Kerala", "population of
-Delhi"), and block anything unrelated to planning a trip.
-
+Delhi"), and block anything unrelated to planning a trip, or asking for illegal
+or harmful actions.
 
 Return strict JSON only:
 {{
@@ -370,6 +372,27 @@ User request:
             "llm_calls": llm_calls,
         }
 
+    return {
+        "guardrail_allowed": True,
+        "guardrail_reason": guardrail_reason,
+        "llm_calls": llm_calls,
+    }
+
+
+# =========================
+# Supervisor Agent
+# =========================
+def supervisor_agent(state: TravelState):
+    """Runs only for requests the guardrail allowed. Chooses which specialist agents this
+    request needs and extracts trip constraints.
+
+    If the request names no destination there is nothing to plan, so it sets needs_clarification
+    and a question in final_response; the graph then goes to reply_agent instead of the pipeline.
+    Fails safe: on any error the full workflow is selected.
+    """
+    query = state["user_query"]
+    llm_calls = state.get("llm_calls", 0)
+
     supervisor_prompt = f"""
 You are the supervisor of a multi-agent travel-planning system.
 Choose only the specialist agents needed for the request.
@@ -380,6 +403,11 @@ Available agents:
 - weather_agent: weather, climate, season, forecast, or packing advice
 - budget_agent: cost, affordability, price limits, or budget feasibility
 - itinerary_agent: creates the integrated travel plan and must always be included
+
+A country, state, region or continent (for example Europe, Kerala, Southeast Asia) counts as a destination.
+Leave "destination" empty only if the request does not name or clearly imply any place.
+Set "is_trip_request" to false if the user only asks a question about a place (visa rules, best time to
+visit, general information) and does not ask for a trip plan. Otherwise set it to true.
 
 Return strict JSON only using this schema:
 {{
@@ -392,6 +420,7 @@ Return strict JSON only using this schema:
     "travel_style": "",
     "special_preferences": []
   }},
+  "is_trip_request": true,
   "reasoning": ""
 }}
 
@@ -422,6 +451,37 @@ User request:
 
         reasoning = str(parsed.get("reasoning", "")).strip()
         llm_calls += 1
+
+        # Only an information question (visa rules, best time to visit...): do not run the pipeline.
+        if parsed.get("is_trip_request", True) is False:
+            info_reply = ("I plan trips (flights, hotels, weather, a day-by-day itinerary and a budget) "
+                          "rather than answer general travel questions. Tell me where you want to go, "
+                          "for how many days and your budget, and I will include visa and travel tips "
+                          "in the plan.")
+            return {
+                "needs_clarification": True,
+                "selected_agents": [],
+                "trip_constraints": constraints,
+                "supervisor_reasoning": "Information question, not a trip request.",
+                "final_response": info_reply,
+                "messages": [AIMessage(content=info_reply)],
+                "llm_calls": llm_calls,
+            }
+
+        # Not enough information to plan: ask the user instead of running the pipeline.
+        if not str(constraints.get("destination", "")).strip():
+            question = ("I need a bit more detail to plan this. Where would you like to go, "
+                        "for how many days, and what is your budget? "
+                        "(I plan trips and estimate costs, but I can't book tickets.)")
+            return {
+                "needs_clarification": True,
+                "selected_agents": [],
+                "trip_constraints": constraints,
+                "supervisor_reasoning": "Missing destination, asked the user to clarify.",
+                "final_response": question,
+                "messages": [AIMessage(content=question)],
+                "llm_calls": llm_calls,
+            }
     except Exception as exc:
         print(f"Supervisor fallback used: {exc}")
         # Original workflow behavior is preserved as the fallback.
@@ -433,8 +493,7 @@ User request:
         )
 
     return {
-        "guardrail_allowed": True,
-        "guardrail_reason": guardrail_reason,
+        "needs_clarification": False,
         "selected_agents": selected_agents,
         "trip_constraints": constraints,
         "supervisor_reasoning": reasoning,
@@ -469,10 +528,11 @@ def parse_request(state: TravelState):
 
 
 # =========================
-# Guardrail blocked response
+# Reply node: ends the run with a plain message
 # =========================
-def guardrail_blocked_agent(state: TravelState):
-    """Final step for a request the input guardrail blocked: return the reason as the answer."""
+def reply_agent(state: TravelState):
+    """Final step for a request that gets a direct reply instead of a plan: either the guardrail
+    blocked it (reason) or the supervisor needs more detail (a question). No LLM call."""
     reason = state.get("final_response") or state.get("guardrail_reason") or (
         "This request was blocked by the travel input guardrail."
     )
@@ -626,6 +686,19 @@ def itinerary_agent(state: TravelState):
     lines on purpose (budget_agent adds them). Writes itinerary.
     """
 
+    # On a revision, show the model the previous draft and ALL requested changes so far.
+    history = state.get("feedback_history") or []
+    if history and state.get("itinerary"):
+        changes = "\n".join(f"- {c}" for c in history)
+        revision_block = (
+            "THIS IS A REVISION. Rewrite the previous draft below. Keep everything the user did not ask "
+            "to change, and apply EVERY requested change (earlier ones too).\n"
+            f"Requested changes so far:\n{changes}\n"
+            f"Previous draft:\n{state['itinerary']}\n"
+        )
+    else:
+        revision_block = "This is the first draft (no revision requested)."
+
     prompt = f"""Create ONLY the day-by-day plan for the user's request below.
     Do not include a budget summary, flight tables or general tips; those are written later.
     Keep each day to 4-6 short bullet points.
@@ -643,7 +716,7 @@ def itinerary_agent(state: TravelState):
     Flight Results: {state['flight_results']}
     Hotel Results: {state['hotel_results']}
     Trip start date: {state.get('start_date') or 'not given (suggest dates about 8 weeks from today)'}
-    Revision feedback from the user (apply it if present): {state.get('human_feedback') or 'none'}
+    {revision_block}
 
     Weather: {state.get('weather_results') or 'not available'}
 
@@ -794,9 +867,16 @@ def human_approval_agent(state: TravelState):
         "draft_itinerary": state.get("itinerary", ""),
         "budget_table": state.get("budget_table", ""),
     })
+    approved = bool(review.get("approved", False))
+    feedback = str(review.get("feedback", "")).strip()
+    # Keep every change the user asked for, so a later revision does not forget an earlier one.
+    history = list(state.get("feedback_history") or [])
+    if not approved and feedback:
+        history.append(feedback)
     return {
-        "approved": bool(review.get("approved", False)),
-        "human_feedback": str(review.get("feedback", "")).strip(),
+        "approved": approved,
+        "human_feedback": feedback,
+        "feedback_history": history,
     }
 
 
@@ -805,6 +885,7 @@ def human_approval_agent(state: TravelState):
 graph = StateGraph(TravelState)
 
 
+graph.add_node("input_guardrail_agent",input_guardrail_agent)
 graph.add_node("supervisor_agent",supervisor_agent)
 graph.add_node("parse_request",parse_request)
 graph.add_node("flight_agent",flight_agent)
@@ -813,7 +894,7 @@ graph.add_node("weather_agent",weather_agent)
 graph.add_node("itinerary_agent",itinerary_agent)
 graph.add_node("budget_agent",budget_agent)
 graph.add_node("final_agent",final_agent)
-graph.add_node("guardrail_blocked_agent",guardrail_blocked_agent)
+graph.add_node("reply_agent",reply_agent)
 graph.add_node("human_approval_agent", human_approval_agent)
 
 
@@ -822,9 +903,14 @@ graph.add_node("human_approval_agent", human_approval_agent)
 PIPELINE = ["parse_request", "flight_agent", "hotel_agent", "weather_agent", "itinerary_agent", "budget_agent"]
 
 
+def route_after_guardrail(state: TravelState):
+    """Guardrail result: a blocked request gets a direct reply, an allowed one goes to the supervisor."""
+    return "supervisor_agent" if state.get("guardrail_allowed", True) else "reply_agent"
+
+
 def route_after_supervisor(state: TravelState):
-    """Guardrail result: a blocked request ends the run, an allowed one continues."""
-    return "parse_request" if state.get("guardrail_allowed", True) else "guardrail_blocked_agent"
+    """Supervisor result: a request with no destination gets a question, otherwise the pipeline starts."""
+    return "reply_agent" if state.get("needs_clarification") else "parse_request"
 
 
 def next_step(current: str):
@@ -838,12 +924,16 @@ def next_step(current: str):
     return router
 
 
-graph.add_edge(START,"supervisor_agent")
+graph.add_edge(START, "input_guardrail_agent")
+graph.add_conditional_edges(
+    "input_guardrail_agent", route_after_guardrail,
+    {"supervisor_agent": "supervisor_agent", "reply_agent": "reply_agent"},
+)
 graph.add_conditional_edges(
     "supervisor_agent", route_after_supervisor,
-    {"parse_request": "parse_request", "guardrail_blocked_agent": "guardrail_blocked_agent"},
+    {"parse_request": "parse_request", "reply_agent": "reply_agent"},
 )
-graph.add_edge("guardrail_blocked_agent", END)
+graph.add_edge("reply_agent", END)
 for _node in PIPELINE:
     _targets = PIPELINE[PIPELINE.index(_node) + 1:] + ["human_approval_agent"]
     graph.add_conditional_edges(_node, next_step(_node), {t: t for t in _targets})
@@ -911,12 +1001,14 @@ def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str
         "budget_inr": 0,
         "guardrail_allowed": True,
         "guardrail_reason": "",
+        "needs_clarification": False,
         "selected_agents": [],
         "trip_constraints": {},
         "supervisor_reasoning": "",
         "final_response": "",
         "approved": False,
         "human_feedback": "",
+        "feedback_history": [],
 
     },
     config=config
@@ -927,8 +1019,9 @@ def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str
             "draft_itinerary": draft["draft_itinerary"],
             "budget_table": draft["budget_table"]}
 
-    # A request blocked by the input guardrail has no itinerary: its message is final_response.
-    if result.get("guardrail_allowed") is False:
+    # A blocked request (guardrail) or one that needs more detail (supervisor) has no itinerary:
+    # its message is final_response.
+    if result.get("guardrail_allowed") is False or result.get("needs_clarification"):
         final_answer = result.get("final_response", "")
     else:
         final_answer = result["messages"][-1].content
@@ -942,16 +1035,42 @@ def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str
         "itinerary": result.get("itinerary",""),
         "llm_calls": result.get("llm_calls",0),
         "guardrail_allowed": result.get("guardrail_allowed", True),
+        "needs_clarification": bool(result.get("needs_clarification", False)),
         "selected_agents": result.get("selected_agents", []),
         "supervisor_reasoning": result.get("supervisor_reasoning", ""),
     }
 
 
+# One lock per trip: two approvals arriving at the same moment (double click, retry, two tabs)
+# must not both resume the same paused run.
+_resume_locks: dict[str, threading.Lock] = {}
+_resume_locks_guard = threading.Lock()
+
+
+def _resume_lock(thread_id: str) -> threading.Lock:
+    """The lock for one thread_id, created on first use."""
+    with _resume_locks_guard:
+        return _resume_locks.setdefault(thread_id, threading.Lock())
+
+
 def resume_travel_agent(thread_id: str, approved: bool, feedback: str = ""):
-    """Continue a paused run with the user's answer."""
-    config = {"configurable": {"thread_id": thread_id}}
-    result = travel_graph.invoke(
-        Command(resume={"approved": approved, "feedback": feedback}), config=config)
+    """Continue a paused run with the user's answer.
+
+    Raises ValueError if this trip is not waiting for approval (unknown thread, or already
+    finished) or is already being processed, so a repeated click or a stale request cannot
+    re-run the final answer."""
+    lock = _resume_lock(thread_id)
+    if not lock.acquire(blocking=False):
+        raise ValueError("This request is already being processed.")
+    try:
+        config = {"configurable": {"thread_id": thread_id}}
+        snapshot = travel_graph.get_state(config)
+        if "human_approval_agent" not in (snapshot.next or ()):
+            raise ValueError("No itinerary is waiting for approval for this trip. Please start a new trip.")
+        result = travel_graph.invoke(
+            Command(resume={"approved": approved, "feedback": feedback}), config=config)
+    finally:
+        lock.release()
     if result.get("__interrupt__"):  # revision made a new draft: ask again
         draft = result["__interrupt__"][0].value
         return {"thread_id": thread_id, "needs_approval": True,

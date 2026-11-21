@@ -203,6 +203,7 @@
   // Send the user's answer to /api/approve and show whatever comes back
   // (the final answer, or a new draft if they asked for changes).
   async function sendDecision(approved, feedback) {
+    if (sendBtn.disabled) return;  // a request is already running: ignore repeat clicks
     setBusy(true);
     const progress = addProgress();
     try {
@@ -211,7 +212,14 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ thread_id: threadId, approved, feedback }),
       });
-      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      if (!res.ok) {
+        let detail = `Request failed (${res.status})`;
+        try {
+          const body = await res.json();
+          if (body.detail && typeof body.detail === "string") detail = body.detail;
+        } catch (_) {}
+        throw new Error(detail);
+      }
       const data = await res.json();
       progress.stop();
       handleResponse(data);

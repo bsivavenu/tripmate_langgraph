@@ -68,6 +68,8 @@ def approve(req: ApproveRequest):
     """Resume a paused trip with the user's Approve / Request-changes answer."""
     try:
         return resume_travel_agent(req.thread_id, req.approved, req.feedback)
+    except ValueError as e:  # nothing is waiting for approval on this thread
+        return JSONResponse({"detail": str(e)}, status_code=409)
     except Exception as e:
         return JSONResponse({"detail": str(e)}, status_code=500)
 
