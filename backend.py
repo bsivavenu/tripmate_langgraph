@@ -7,6 +7,7 @@ run_travel_agent(). See README.md for the architecture and the diagram in docs/.
 """
 
 import os
+import re
 import json
 import uuid
 import asyncio
@@ -413,6 +414,8 @@ def supervisor_agent(state: TravelState):
         'If the new message is a follow-up that changes or continues that trip and names no new destination '
         '(for example "make it cheaper", "add one more day", "same trip with a 50000 budget"), rewrite the '
         'earlier request with the change applied as ONE complete standalone request in "standalone_request". '
+        'Turn a vague change into a concrete number (for example "cheaper" means a budget about 20% lower, '
+        '"longer" means one more day) instead of leaving it vague. '
         'If the new message is a new trip or an unrelated request, copy the new message unchanged.\n'
         if previous else ""
     )
@@ -802,8 +805,121 @@ class BudgetItems(BaseModel):
     )
 
 
+# ---------------------------------------------------------------------------------------------
+# Budget, step 1: read the itinerary's "Costs:" lines in plain Python (no AI call, instant).
+# itinerary_agent is told to end every day with exactly:
+#   "Costs: hotel ₹X, meals ₹X, transport ₹X, entry/activities ₹X"
+# If anything about the plan looks unusual, these helpers return None and budget_agent asks the AI instead.
+# ---------------------------------------------------------------------------------------------
+_COST_CATEGORIES = [
+    ("Hotels", ("hotel", "accommodation", "stay")),
+    ("Meals", ("meal", "food")),
+    ("Transport", ("transport",)),
+    ("Entry fees & activities", ("entry", "activit")),
+]
+_COST_PIECE = re.compile(r"([A-Za-z][A-Za-z /&-]*?)\s*[:=]?\s*(?:₹|rs\.?|inr)?\s*(\d[\d,]*)", re.I)
+
+
+def _parse_cost_lines(itinerary: str):
+    """Add up the per-day 'Costs:' lines. Returns ({category: INR}, biggest single-day transport cost), or None
+    when the plan cannot be read safely (a day without a Costs line, or a line missing one of the four categories)."""
+    totals = {cat: 0 for cat, _ in _COST_CATEGORIES}
+    biggest_transport = 0
+    lines = 0
+    for raw in (itinerary or "").splitlines():
+        m = re.match(r"^\s*[-*•]?\s*\**\s*costs?\s*:\s*\**\s*(.*)$", raw, re.I)
+        if not m:
+            continue
+        found = {}
+        for label, amount in _COST_PIECE.findall(m.group(1)):
+            for cat, words in _COST_CATEGORIES:
+                if any(w in label.lower() for w in words):
+                    found[cat] = int(amount.replace(",", ""))
+        if len(found) != len(_COST_CATEGORIES):
+            return None
+        for cat, value in found.items():
+            totals[cat] += value
+        biggest_transport = max(biggest_transport, found["Transport"])
+        lines += 1
+    day_numbers = set(re.findall(r"Day\s+(\d+)", itinerary or ""))
+    if lines == 0 or (day_numbers and lines < len(day_numbers)):
+        return None
+    return totals, biggest_transport
+
+
+def _pick_fare(flight_results: str, itinerary: str):
+    """The round-trip fare of the flight the itinerary uses (one adult), or None if it cannot be told."""
+    fares = []  # (flight numbers, price)
+    for line in (flight_results or "").splitlines():
+        price = re.search(r"round trip INR ([\d,]+)", line)
+        if not price:
+            continue
+        numbers = re.search(r"\(([^)]*)\)", line)
+        codes = [c.replace(" ", "").upper() for c in re.findall(r"[A-Za-z0-9]{2}\s?\d{1,4}", numbers.group(1) if numbers else "")]
+        fares.append((codes, int(price.group(1).replace(",", ""))))
+    if not fares:
+        return None
+    text = re.sub(r"\s+", "", (itinerary or "").upper())
+    matched = [price for codes, price in fares if any(c in text for c in codes)]
+    if matched:
+        return matched[0]
+    if len(fares) == 1:
+        return fares[0][1]
+    for _, price in fares:  # the itinerary may quote the fare itself
+        if f"₹{price:,}" in (itinerary or "") or f"₹{price}" in (itinerary or ""):
+            return price
+    return None
+
+
+def _travellers(user_query: str):
+    """Number of travellers if the request makes it clear (1 when nothing hints at a group); None if unsure."""
+    q = (user_query or "").lower()
+    n = re.search(r"\b(\d+)\s*(?:travell?ers?|people|persons?|adults?|pax|members)\b", q)
+    if n:
+        return int(n.group(1))
+    if re.search(r"\b(couple|girlfriend|boyfriend|wife|husband|partner|spouse|family|friends?|kids?|children|group|parents|honeymoon|we|us|our)\b", q):
+        return None
+    if re.search(r"\bfor\s+\d+\b(?!\s*(?:days?|nights?|weeks?|k\b))", q):
+        return None
+    return 1
+
+
+def _budget_in_python(state: TravelState):
+    """Fast path for budget_agent. Returns the per-category totals (flight fare included), or None to use the AI."""
+    parsed = _parse_cost_lines(state.get("itinerary", ""))
+    if parsed is None:
+        return None
+    totals, biggest_transport = parsed
+    flights = state.get("flight_results", "")
+    if "round trip INR" in flights:  # real fares were left out of the day costs on purpose; add once
+        fare, people = _pick_fare(flights, state.get("itinerary", "")), _travellers(state.get("user_query", ""))
+        if fare is None or people is None:
+            return None
+        if biggest_transport >= fare * 0.5:
+            return None  # a day's transport is as big as the fare: the plan probably already counted the flight
+        totals["Transport"] += fare * people
+    return totals
+
+
+def _budget_table(totals: dict):
+    """The markdown table and the grand total for final_agent."""
+    grand = sum(totals.values())
+    rows = "\n".join(f"| {cat} | {amt:,} |" for cat, amt in totals.items())
+    return f"| Category | Cost (INR) |\n|---|---|\n{rows}\n| **Total** | **{grand:,}** |", grand
+
+
 def budget_agent(state: TravelState):
-    """Read every cost out of the itinerary, then add them up in code (LLMs add badly)."""
+    """Add up every cost in the plan, in code (LLMs add badly).
+
+    First tries to read the itinerary's 'Costs:' lines in Python: no AI call, about 7 s and 2k tokens saved.
+    If the plan looks unusual (a missing line, several flight options, an unclear number of travellers),
+    it falls back to asking the fast AI to extract the costs."""
+    totals = _budget_in_python(state)
+    if totals is not None:
+        table, grand = _budget_table(totals)
+        return {"budget_table": table, "budget_total": grand}
+    print("BUDGET: plan not readable in Python, asking the AI instead", flush=True)
+
     try:
         extractor = fast_llm.with_structured_output(BudgetItems)
         extracted = extractor.invoke([
@@ -827,10 +943,7 @@ def budget_agent(state: TravelState):
     # Real fares were left out of the day costs on purpose; add them here, once.
     if "round trip INR" in state.get("flight_results", "") and extracted.flight_total_inr > 0:
         totals["Transport"] = totals.get("Transport", 0) + extracted.flight_total_inr
-    grand = sum(totals.values())
-
-    rows = "\n".join(f"| {cat} | {amt:,} |" for cat, amt in totals.items())
-    table = f"| Category | Cost (INR) |\n|---|---|\n{rows}\n| **Total** | **{grand:,}** |"
+    table, grand = _budget_table(totals)
     return {"budget_table": table, "budget_total": grand, "llm_calls": state.get("llm_calls", 0) + 1}
 
 

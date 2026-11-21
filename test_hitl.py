@@ -12,14 +12,16 @@ Flow tested:
   6. A travel request with no destination              -> the supervisor asks a question, no pause
   7. An information-only question (visa rules)         -> redirected with no pipeline run, no pause
   8. A region as destination ("Europe")                -> treated as a destination, pauses with a draft
-  0. (first, no API calls) airport names with a country resolve; Tavily errors raise instead of ""
+  0. (first, no API calls) airport names with a country resolve; Tavily errors raise instead of "";
+     the budget is read from the plan's Costs: lines in Python (no AI call) and falls back to the AI when unsure
   9. Request changes that alters the trip length       -> days, fares and the final answer all follow it
  10. Follow-ups ("make it cheaper") on the same trip   -> merged with the earlier request; a new trip is not merged
  11. A draft waiting for approval can be looked up     -> get_pending_approval (used to restore it after a reload)
  12. review=False                                      -> final answer directly, no approval pause
 """
 import re
-from backend import run_travel_agent, resume_travel_agent, get_pending_approval, travel_graph
+from backend import (run_travel_agent, resume_travel_agent, get_pending_approval, travel_graph,
+                     budget_agent, _budget_in_python, _parse_cost_lines, _pick_fare, _travellers)
 from mcp_client import _format_results
 from tools.flight_tool import resolve_location_to_iatas
 
@@ -50,6 +52,37 @@ except RuntimeError:
 check("Tavily normal results still format",
       "Hotel A" in _format_results('{"results":[{"title":"Hotel A","url":"u","content":"nice"}]}'))
 
+
+# 0c. Budget read in Python from the plan's "Costs:" lines (no AI call)
+PLAN = """### Day 1 — 10 Feb
+- Take IndiGo 6E 362 from Hyderabad at 11:25.
+- Costs: hotel ₹1,100 (est.), meals ₹500 (est.), transport ₹300 (est.), entry/activities ₹0
+### Day 2 — 11 Feb
+- **Costs:** hotel ₹1,100, meals ₹500, transport ₹300, entry/activities ₹200
+"""
+FARES = ("Real round-trip fares HYD <-> GOI\n"
+         "- IndiGo (6E 121): HYD 15:35 -> GOI 16:40, non-stop, 1h 05m, round trip INR 9,154\n"
+         "- IndiGo (6E 362): HYD 11:25 -> GOI 12:35, non-stop, 1h 10m, round trip INR 9,364")
+totals, _big = _parse_cost_lines(PLAN)
+check("day costs are added up from the Costs lines (also with bold and commas)",
+      totals == {"Hotels": 2200, "Meals": 1000, "Transport": 600, "Entry fees & activities": 200})
+check("a day without a Costs line is not guessed", _parse_cost_lines(PLAN.replace("- **Costs:** hotel ₹1,100, meals ₹500, transport ₹300, entry/activities ₹200\n", "")) is None)
+check("a Costs line missing a category is not guessed", _parse_cost_lines(PLAN.replace(", entry/activities ₹0", "")) is None)
+check("the fare of the flight the plan uses is picked (6E 362, not the first or cheapest)", _pick_fare(FARES, PLAN) == 9364)
+check("with several fares and no clue the fare is not guessed", _pick_fare(FARES, "### Day 1\n- Fly to Goa.") is None)
+check("one traveller by default", _travellers("3 day trip from Hyderabad to Goa under 25000") == 1)
+check("'2 travellers' is understood", _travellers("7 days in Bali, 2 travellers") == 2)
+check("'me and my girlfriend' is not guessed", _travellers("trip for me and my girlfriend") is None)
+state = {"itinerary": PLAN, "flight_results": FARES, "user_query": "2 day trip to Goa under 25000"}
+out = budget_agent(state)
+check("budget_agent makes no AI call when the plan is readable", "llm_calls" not in out)
+check("budget total = day costs + flight fare", out["budget_total"] == 2200 + 1000 + 600 + 200 + 9364)
+check("budget table shows the right total row", "| **Total** | **13,364** |" in out["budget_table"])
+inflated = PLAN.replace("transport ₹300 (est.), entry/activities ₹0", "transport ₹9,500 (flight + taxi), entry/activities ₹0")
+check("a plan that already counted the flight is handed to the AI (no double count)",
+      _budget_in_python({"itinerary": inflated, "flight_results": FARES, "user_query": "2 day trip to Goa"}) is None)
+check("two travellers multiply the fare",
+      budget_agent({**state, "user_query": "2 day trip to Goa, 2 travellers"})["budget_total"] == 2200 + 1000 + 600 + 200 + 2 * 9364)
 
 # 1. Start a trip: the run should stop and ask for approval
 r1 = run_travel_agent("2 day trip from Bangalore to Goa, mid-range, budget 20000 INR",
