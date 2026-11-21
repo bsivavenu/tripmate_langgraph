@@ -11,7 +11,7 @@ import requests
 from dotenv import load_dotenv
 
 # from tools.flight_tool import resolve_location_to_iatas, DEFAULT_ORIGIN_IATA
-from tools.flight_tool import resolve_location_to_iatas, DEFAULT_ORIGIN_IATA, AIRPORTS, LOCATION_OVERRIDES
+from tools.flight_tool import resolve_location_to_iatas, DEFAULT_ORIGIN_IATA, AIRPORTS, override_for
 
 load_dotenv()
 
@@ -65,9 +65,10 @@ def search_flight_prices(origin: str, destination: str, trip_days: int = 0,
         return ""
 
     dep_codes = resolve_location_to_iatas(origin) if origin else [DEFAULT_ORIGIN_IATA]
-    if (destination or "").strip().lower() in LOCATION_OVERRIDES:
+    override = override_for(destination)
+    if override:
         # known tricky place: trust our table over the LLM's guessed code (it said GOA for Goa)
-        arr_codes = LOCATION_OVERRIDES[destination.strip().lower()]
+        arr_codes = override
     elif arrival_iata in AIRPORTS:
         arr_codes = [arrival_iata]
     else:

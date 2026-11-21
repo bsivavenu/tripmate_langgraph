@@ -12,14 +12,38 @@ Flow tested:
   6. A travel request with no destination              -> the supervisor asks a question, no pause
   7. An information-only question (visa rules)         -> redirected with no pipeline run, no pause
   8. A region as destination ("Europe")                -> treated as a destination, pauses with a draft
+  0. (first, no API calls) airport names with a country resolve; Tavily errors raise instead of ""
 """
 from backend import run_travel_agent, resume_travel_agent
+from mcp_client import _format_results
+from tools.flight_tool import resolve_location_to_iatas
 
 
 def check(label, condition):
     print(("PASS" if condition else "FAIL"), "-", label)
     if not condition:
         raise SystemExit(1)
+
+
+# 0. Quick checks that need no API calls
+# 0a. Airport names the LLM writes with a country still resolve (Bali, Kyoto, Goa, Leh were missing)
+for name, expected in [("Bali, Indonesia", "DPS"), ("Kyoto", "KIX"), ("Kyoto, Japan", "KIX"),
+                       ("Goa, India", "GOI"), ("Leh", "IXL"), ("Ladakh, India", "IXL"), ("Goa", "GOI")]:
+    check(f"airport for {name!r} is {expected}", expected in resolve_location_to_iatas(name))
+
+# 0b. A Tavily error response must raise (so hotel_agent can fall back), not become an empty string
+try:
+    _format_results('{"error":"Search failed","detail":"Invalid Tavily API key"}')
+    check("Tavily error response raises", False)
+except RuntimeError:
+    check("Tavily error response raises", True)
+try:
+    _format_results('{"results": []}')
+    check("Tavily empty results raise", False)
+except RuntimeError:
+    check("Tavily empty results raise", True)
+check("Tavily normal results still format",
+      "Hotel A" in _format_results('{"results":[{"title":"Hotel A","url":"u","content":"nice"}]}'))
 
 
 # 1. Start a trip: the run should stop and ask for approval

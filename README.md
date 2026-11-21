@@ -365,7 +365,7 @@ curl -s localhost:8000/api/approve -H 'content-type: application/json' \
 
 ### Airports: the one place that bit us
 
-The planner resolves city names to airport codes with `airportsdata`, and some names collide: **"Goa" matched `GOA` (Genoa, Italy)** instead of `GOI`, and "Bali" matched an airport in Cameroon. The fix is the `LOCATION_OVERRIDES` table in `tools/flight_tool.py`, checked first. It also beats the LLM's guessed `arrival_airport`. **If a route returns odd fares, check the airport code first** and add an override.
+The planner resolves city names to airport codes with `airportsdata`, and some names collide: **"Goa" matched `GOA` (Genoa, Italy)** instead of `GOI`, and "Bali" matched an airport in Cameroon. The fix is the `LOCATION_OVERRIDES` table in `tools/flight_tool.py`, checked first. It also beats the LLM's guessed `arrival_airport`. **If a route returns odd fares, check the airport code first** and add an override. Overrides match the whole name and each comma-separated part, so `Bali, Indonesia` finds `bali`; a place with no airport (Kyoto) maps to the nearest one (KIX).
 
 ### How `llm_calls` is counted
 
@@ -399,7 +399,6 @@ LangGraph (supervisor, conditional edges, `interrupt()`) + LangChain · Groq or 
 - **Every trip needs a click.** The run always pauses for approval before the final answer. There is no "skip review" option yet.
 - **A pending draft does not survive a page reload in the UI.** The run stays paused in PostgreSQL, but the buttons are gone; start a new trip. (The `thread_id` is kept, so the state is not lost, only the UI to continue it.)
 - **Approval with a narrow plan is untested.** If the supervisor skips `itinerary_agent` (for example a flights-only request), the draft shown for approval may be empty, and *Request changes* always loops back to `itinerary_agent`.
-- **Open issues found by testing** (see [docs/TESTING.md](docs/TESTING.md)): a wrong Tavily key returns empty hotel results without the "general advice" fallback; "Bali, Indonesia" and Kyoto do not resolve to an airport, so fares fall back to estimates.
 - **No conversation memory.** Each message is handled on its own. A follow-up such as "make it cheaper" or "ok, book it" has no destination, so the supervisor asks the question again instead of using the earlier message.
 - **The guardrail is an LLM judgement.** It blocks general-knowledge questions and unrelated requests, but borderline phrasing can slip through or be blocked wrongly. If the guardrail call itself fails, the request is allowed.
 - **Prices are estimates.** Hotel and cost figures come from web snippets and LLM estimates; fares come from Google Flights via SerpApi. Always verify before booking.

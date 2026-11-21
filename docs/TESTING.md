@@ -1,6 +1,6 @@
 # TripMate: testing guide and test report
 
-Branch: `multi-agent-supervisor-guardrails-hitl` · Tested: 20 Nov 2026
+Branch: `multi-agent-supervisor-guardrails-hitl` · Tested: 20 Nov 2026 (bugs 5 and 6 fixed the same day)
 
 This document has three parts:
 
@@ -29,8 +29,8 @@ How the testing was done, honestly:
 | Clarification / info-only replies | Works after fixes 3 and 4 |
 | Human approval (pause, revise, approve) | Works after fixes 1 and 2 |
 | UI behaviour | Works; two known limitations |
-| Failure handling (bad API keys) | 2 of 3 graceful; 1 gap (open issue 5) |
-| Open bugs | 2 (issues 5 and 6) plus minor items |
+| Failure handling (bad API keys) | 3 of 3 graceful after fix 5 |
+| Open bugs | None from this round; minor items below |
 
 ### What works well
 
@@ -54,10 +54,10 @@ How the testing was done, honestly:
 | **2** | Approve was not safe to repeat. Approving a finished trip re-ran the final answer; approving an unknown trip gave a raw `KeyError: 'user_query'` (HTTP 500); two approvals sent at the same moment both ran and showed two answers. | **Fixed.** Only a trip that is waiting for approval can be resumed; the rest get a clear `409` message; a per-trip lock lets only one approval run at a time. Verified: 3 simultaneous approvals gave 1 answer and 2 rejections; in the browser, two forced clicks gave exactly one answer. |
 | **3** | Information questions ran the whole pipeline. `visa requirements for Japan?` searched flights, hotels and weather (it spent a SerpApi search) and showed Approve buttons on a draft that said "a plan isn't applicable". | **Fixed.** The supervisor now marks these as "not a trip request" and replies with an invitation to send a trip request. No agents run (replied in about 6 seconds). |
 | **4** | A region was treated as "no destination". `15 day trip from Mumbai to Europe under 300000` got "Where would you like to go?". | **Fixed.** Countries, states, regions and continents count as destinations. `Europe` and `Southeast Asia` now produce drafts. |
-| **5** | **Open.** A wrong Tavily key gives **empty hotel results** with no "general advice" fallback. In `mcp_client.py`, `_format_results` returns `""` for an error response instead of raising, so the fallback in `hotel_agent` never runs. The planner then has no hotel data and may invent hotels. | Open (medium) |
-| **6** | **Open.** Fares are missing for Bali and Kyoto. The Bali override is the key `"bali"` but the supervisor produced `"Bali, Indonesia"`, so it likely misses. Kyoto has no override (it should map to KIX). The plans fall back to an estimated fare (about ₹45,000). | Open (medium); the Bali cause is from reading the code, not confirmed |
+| **5** | A wrong Tavily key gave **empty hotel results** with no "general advice" fallback. Tavily returns `{"error": "Search failed", ...}` instead of raising, and `_format_results` in `mcp_client.py` turned that into `""`, so the fallback in `hotel_agent` never ran. The planner then had no hotel data and could invent hotels. | **Fixed.** `_format_results` now raises on an error response or empty results. `hotel_agent` logs it (`HOTEL AGENT MCP ERROR`) and gives that place a note: general advice only, no invented names or prices. Multi-city trips fall back **per city**, so one failed city keeps the others' real results. Verified with a bad key (single and multi-city) and with the real key (unchanged). |
+| **6** | Fares were missing for Bali and Kyoto. The generic lookup returned nothing for `Bali, Indonesia`, `Kyoto`, `Kyoto, Japan`, `Goa, India`, `Ladakh, India`, `Andaman Islands`, and `Leh` resolved to `LEH` (Le Havre, France). | **Fixed.** Overrides now match each comma-separated part (`Bali, Indonesia` finds `bali`), the lookup falls back to the part before the comma, and `kyoto` (KIX, ITM), `leh` (IXL), `ubud` and `andaman islands` were added. Verified: real fares came back for DEL↔DPS and HYD↔KIX. |
 
-Regression check after fixes 1 to 4: 8 prompts (6 plan requests, including one that mentions a visa, one for a region and a 1-day trip, plus 2 information questions) all behaved as expected, and the 23 checks in `test_hitl.py` pass.
+Regression check after fixes 1 to 4 (before fixes 5 and 6 were made): 8 prompts (6 plan requests, including one that mentions a visa, one for a region and a 1-day trip, plus 2 information questions) all behaved as expected, and the 23 checks in `test_hitl.py` pass.
 
 ### Minor items
 
@@ -96,7 +96,7 @@ Before you start, see [setup](#before-you-start).
 | H1 | `3 day trip from Hyderabad to Goa under 25000` | Draft with a budget table; Approve gives the 7-section answer. Flight is Hyderabad ↔ **GOI** (Goa), not Genoa. | ✅ | ☐ Pass ☐ Fail |
 | H2 | `5 day trip from Hyderabad to Seoul, budget ₹1,50,000` | International trip. Final answer says "check visa requirements" and names no visa scheme. | ✅ | ☐ Pass ☐ Fail |
 | H3 | `1 week trip from hyderabad to all gujrat markets under 30000 for 1 person` | Multi-city route (Ahmedabad → Vadodara → Surat → Rajkot). | ✅ | ☐ Pass ☐ Fail |
-| H4 | `7 days in Bali from Delhi, mid-range, 2 travellers` | Plan covers 2 people. **Known issue 6:** fares show as an estimate. | ✅ | ☐ Pass ☐ Fail |
+| H4 | `7 days in Bali from Delhi, mid-range, 2 travellers` | Plan covers 2 people. Fares are real (DEL ↔ DPS), not an estimate. (This was bug 6.) | ✅ | ☐ Pass ☐ Fail |
 | H5 | `weekend getaway from Bangalore to Goa under 20000` | Short trip; nights = days − 1. | ✅ | ☐ Pass ☐ Fail |
 
 ### 2. Approval flow
@@ -139,7 +139,7 @@ curl -s -i localhost:8000/api/approve -H 'content-type: application/json' \
 | # | Ask | Expected | Me | Your result |
 |---|---|---|---|---|
 | L1 | `4 day trip to goa from hydrabad under 30k` | Typos and "30k" work. A 4-day draft. | ✅ | ☐ Pass ☐ Fail |
-| L2 | `plan a trip to Kyoto for 5 days, i have 1 lakh` | Allowed; origin falls back to the default (HYD). **Known issue 6:** fares are an estimate. | ✅ | ☐ Pass ☐ Fail |
+| L2 | `plan a trip to Kyoto for 5 days, i have 1 lakh` | Allowed; origin falls back to the default (HYD). Fares are real (HYD ↔ KIX, Osaka). (This was bug 6.) | ✅ | ☐ Pass ☐ Fail |
 | L3 | `Plan 5 days in Tokyo from Hyderabad, budget 1.5 lakh, and tell me about visa requirements` | A draft (it is a plan request, visa info is included). | ✅ | ☐ Pass ☐ Fail |
 | L4 | `హైదరాబాద్ నుండి గోవా 3 రోజుల ట్రిప్ 25000 లోపు` (Telugu) | A draft written in Telugu. | ✅ | ☐ Pass ☐ Fail |
 
@@ -189,7 +189,7 @@ Edit `.env`, **restart the server**, run `3 day trip from Hyderabad to Goa under
 
 | # | Break this | Expected | Me | Your result |
 |---|---|---|---|---|
-| F1 | Wrong `TAVILY_API_KEY` | **Currently:** hotel results are empty and there is **no** fallback note (open issue 5). **Desired:** the plan completes with labelled general advice and the log shows `HOTEL AGENT MCP ERROR`. | ✅ (gap) | ☐ Pass ☐ Fail |
+| F1 | Wrong `TAVILY_API_KEY` | The plan completes; the hotel section is general advice labelled non-live (est.) with no invented hotel names; the log shows `HOTEL AGENT MCP ERROR`. (This was bug 5.) | ✅ | ☐ Pass ☐ Fail |
 | F2 | Wrong `OPENWEATHER_API_KEY` | Weather says "not available" for the city; the plan still completes. | ✅ | ☐ Pass ☐ Fail |
 | F3 | Wrong `SERPAPI_API_KEY` | Flights say fares unavailable, with labelled estimates. | ✅ | ☐ Pass ☐ Fail |
 | F4 | Stop PostgreSQL | The UI shows "Something went wrong: …"; the log shows a database error. | ⬜ | ☐ Pass ☐ Fail |
@@ -214,7 +214,7 @@ Edit `.env`, **restart the server**, run `3 day trip from Hyderabad to Goa under
 uv run python test_hitl.py
 ```
 
-It uses real API calls (a few credits) and prints `PASS` or `FAIL` for each of 23 checks, ending with `ALL TESTS PASSED`. It covers: pause for approval, two revisions in a row, approval, rejecting a repeated or unknown approval, the guardrail, clarification, information-only questions, and "Europe" as a destination.
+It prints `PASS` or `FAIL` for each check, ending with `ALL TESTS PASSED`. The first checks need no API calls (airport names such as `Bali, Indonesia`, `Kyoto` and `Leh`; Tavily error handling). The rest use real API calls (a few credits). It covers: pause for approval, two revisions in a row, approval, rejecting a repeated or unknown approval, the guardrail, clarification, information-only questions, and "Europe" as a destination.
 
 ### Other quick checks
 
@@ -225,4 +225,4 @@ uv run python -m tools.flight_prices   # a sample fare lookup (uses 1 SerpApi se
 
 ### Reporting a problem
 
-For anything that differs from "Expected", note the prompt, what you saw, and any red lines from the server terminal. The rows most likely to surface new problems are G6 (mixed attack), A4 (`Make it 2 days instead`), D7 (a long Europe trip), C8 (same origin and destination), and F1.
+For anything that differs from "Expected", note the prompt, what you saw, and any red lines from the server terminal. The rows most likely to surface new problems are G6 (mixed attack), A4 (`Make it 2 days instead`), D7 (a long Europe trip), C8 (same origin and destination), and F4 (PostgreSQL down).

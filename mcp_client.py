@@ -104,9 +104,16 @@ def _format_results(raw) -> str:
     text = raw if isinstance(raw, str) else "".join(
         b.get("text", "") for b in raw if isinstance(b, dict))
     try:
-        results = json.loads(text).get("results", [])
+        data = json.loads(text)
+        results = data.get("results", [])
     except (ValueError, AttributeError):
         return text[:1500]
+    # Tavily reports a bad key or a failed search as {"error": ..., "detail": ...}, not as an exception.
+    # Raise so callers can fall back instead of silently getting an empty string.
+    if isinstance(data, dict) and data.get("error"):
+        raise RuntimeError(f"Tavily search failed: {data.get('error')} - {str(data.get('detail', ''))[:200]}")
+    if not results:
+        raise RuntimeError("Tavily search returned no results")
     lines = []
     for i, r in enumerate(results[:5], 1):
         snippet = " ".join((r.get("content") or "").split())

@@ -594,34 +594,51 @@ def flight_agent(state: TravelState):
         "messages": [AIMessage(content="Flight fares fetched")],
     }
     
+def _hotel_fallback(place: str) -> str:
+    """Note for the planner when live hotel data is missing: general advice only, nothing invented."""
+    return (f"Live hotel search is unavailable for {place or 'this destination'}. Give general "
+            "accommodation and neighbourhood guidance and clearly label it as non-live advice (est.). "
+            "Do not invent hotel names or prices.")
+
+
 def hotel_agent(state: TravelState):
-    """Graph step 3: hotel search with Tavily (through MCP), one search per city for multi-city trips. Writes hotel_results."""
+    """Graph step 3: hotel search with Tavily (through MCP), one search per city for multi-city trips.
+    Writes hotel_results. If a search fails (bad key, no results, network), the error is logged and
+    that place gets a note telling the planner to give general advice instead of inventing hotels."""
     destination = state.get("destination")
     level = state.get("budget_level") or "mid-range"
     cities = state.get("cities") or []
 
-    try:
-        if state.get("trip_type") == "multi_city" and cities:
-            # one search per stop, run together, so every city has its own hotel data
-            async def search_all():
-                return await asyncio.gather(*[
-                    tavily_mcp_search(f"best {level} hotels in {city} with price per night")
-                    for city in cities
-                ])
+    if state.get("trip_type") == "multi_city" and cities:
+        # one search per stop, run together; a failed city does not remove the others' data
+        async def search_all():
+            return await asyncio.gather(*[
+                tavily_mcp_search(f"best {level} hotels in {city} with price per night")
+                for city in cities
+            ], return_exceptions=True)
+        try:
             per_city = asyncio.run(search_all())
-            hotel_results = "\n\n".join(f"### Hotels in {c}\n{r}" for c, r in zip(cities, per_city))
-        else:
-            if destination:
-                query = f"best {level} hotels in {destination} with price per night"
-            else:  # parsing failed: fall back to the raw request
-                query = f"Best hotels for {state['user_query']}"
+        except Exception as exc:  # e.g. the MCP client itself could not start
+            per_city = [exc] * len(cities)
+        blocks = []
+        for city, result in zip(cities, per_city):
+            if isinstance(result, Exception) or not str(result).strip():
+                print(f"HOTEL AGENT MCP ERROR ({city}): {type(result).__name__}: {result}", flush=True)
+                result = _hotel_fallback(city)
+            blocks.append(f"### Hotels in {city}\n{result}")
+        hotel_results = "\n\n".join(blocks)
+    else:
+        if destination:
+            query = f"best {level} hotels in {destination} with price per night"
+        else:  # parsing failed: fall back to the raw request
+            query = f"Best hotels for {state['user_query']}"
+        try:
             hotel_results = asyncio.run(tavily_mcp_search(query))
-    except Exception as exc:
-        # Tavily/MCP down: log it and let the planner continue with clearly-labelled general advice
-        print(f"HOTEL AGENT MCP ERROR: {type(exc).__name__}: {exc}", flush=True)
-        hotel_results = ("Live hotel search is temporarily unavailable. Give general accommodation "
-                         "and neighbourhood guidance for the destination and clearly label it as "
-                         "non-live advice (est.). Do not invent hotel names or prices.")
+            if not hotel_results.strip():
+                raise RuntimeError("empty hotel results")
+        except Exception as exc:
+            print(f"HOTEL AGENT MCP ERROR: {type(exc).__name__}: {exc}", flush=True)
+            hotel_results = _hotel_fallback(destination)
 
     return {
         "hotel_results": hotel_results,

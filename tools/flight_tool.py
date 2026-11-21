@@ -347,15 +347,35 @@ def resolve_location_to_iata(location: str):
 LOCATION_OVERRIDES = {
     "goa": ["GOI"],            # Dabolim (GOA is Genoa, Italy)
     "bali": ["DPS"],           # Denpasar
+    "ubud": ["DPS"],           # Bali's cultural town, no airport of its own
+    "kyoto": ["KIX", "ITM"],   # no airport; Osaka's Kansai / Itami serve it
     "kochi": ["COK"],
     "kashmir": ["SXR"],        # Srinagar
     "ladakh": ["IXL"],         # Leh
+    "leh": ["IXL"],            # generic lookup returns LEH = Le Havre, France
     "andaman": ["IXZ"],        # Port Blair
+    "andaman islands": ["IXZ"],
     "pondicherry": ["PNY"],
     "manali": ["KUU"],         # Kullu-Manali (Bhuntar)
     "shimla": ["SLV"],
     "darjeeling": ["IXB"],     # Bagdogra
 }
+
+
+def override_for(location: str):
+    """The LOCATION_OVERRIDES airports for a place name, or None.
+
+    Matches the whole text ("bali") and also each comma/slash separated part, so the LLM's
+    "Bali, Indonesia" or "Goa, India" still finds the override for "bali" / "goa".
+    """
+    text = (location or "").strip().lower()
+    if text in LOCATION_OVERRIDES:
+        return LOCATION_OVERRIDES[text]
+    for part in re.split(r"[,/()]", text):
+        part = part.strip()
+        if part in LOCATION_OVERRIDES:
+            return LOCATION_OVERRIDES[part]
+    return None
 
 
 def resolve_location_to_iatas(location: str, limit: int = 3):
@@ -364,7 +384,7 @@ def resolve_location_to_iatas(location: str, limit: int = 3):
     A country or metro area has several airports (Japan: HND, NRT, KIX), and a route may
     only exist between some of them, so callers should try each.
     """
-    override = LOCATION_OVERRIDES.get((location or "").strip().lower())
+    override = override_for(location)
     if override:
         return override[:limit]
     for candidate in search_airports(location):
@@ -377,6 +397,9 @@ def resolve_location_to_iatas(location: str, limit: int = 3):
             # A plain city name: only its main airport (avoids HDD/BPM for "Hyderabad").
             return (majors or codes)[:1]
         return (majors + [c for c in codes if c not in _ALL_MAJOR])[:limit]
+    # "Kyoto, Japan" / "Goa, India": nothing matched the whole text, so try the part before the comma.
+    if "," in (location or ""):
+        return resolve_location_to_iatas(location.split(",")[0], limit)
     return []
 
 
