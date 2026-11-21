@@ -6,7 +6,8 @@ It is a **multi-agent LangGraph workflow** served by **FastAPI**, with a small c
 
 - an **input guardrail** that runs first and blocks anything that is not a trip-planning request, then a **supervisor** that picks which specialist agents are needed (or asks for more detail when there is no destination),
 - specialist agents for flights, hotels, weather, itinerary and budget,
-- a **human-in-the-loop approval step** that pauses the run until you click *Approve* or *Request changes*,
+- a **human-in-the-loop approval step** that pauses the run until you click *Approve* or *Request changes* (you can turn the review off with a checkbox, and a pending draft is restored after a page reload),
+- **follow-up memory**: "make it cheaper" or "add one more day" is applied to your earlier trip request,
 - **MCP (Model Context Protocol) servers** for hotels and weather, one of which is written in this repo.
 
 **🌐 Live demo: <https://tripmate-langgraph.onrender.com>** (free tier: the first load after idle can take ~1 minute; it may run an older branch than the one described here, see [Branches](#branches))
@@ -38,15 +39,15 @@ It is a **multi-agent LangGraph workflow** served by **FastAPI**, with a small c
 
 ## How it works in 60 seconds
 
-1. The browser sends the request text (+ an optional start date) to `POST /api/plan` in `app.py`.
+1. The browser sends the request text (+ an optional start date and the *Review the draft* setting) to `POST /api/plan` in `app.py`.
 2. `app.py` calls `run_travel_agent()` in `backend.py`, which runs a **LangGraph graph** that shares one `TravelState` dict between all steps.
 3. **`input_guardrail_agent`** runs first. It blocks anything that is not a trip-planning request (for example "what is the capital of Telangana", or a request to hack an airline). A blocked request goes to `reply_agent`, which returns the reason, and the run ends. It never reaches the supervisor.
-4. An allowed request goes to **`supervisor_agent`**, which chooses the specialists needed. If the request names **no destination** (for example "book the tickets for 50% less"), or only asks an **information question** (for example "visa requirements for Japan?"), the supervisor replies through `reply_agent` instead of planning. A country, state, region or continent (Kerala, Europe, Southeast Asia) counts as a destination. Otherwise `parse_request`, `flight_agent`, `hotel_agent`, `weather_agent`, `itinerary_agent` and `budget_agent` run in a fixed order (unselected ones are skipped).
-5. **`human_approval_agent`** pauses the graph with LangGraph's `interrupt()`. The API returns the **draft itinerary and budget table** (`needs_approval: true`) instead of a final answer, and the UI shows **Approve** and **Request changes** buttons.
+4. An allowed request goes to **`supervisor_agent`**, which chooses the specialists needed. If your message is a **follow-up** ("make it cheaper", "add one more day") it is merged with your earlier trip request in the same conversation into one complete request. If the request names **no destination** (for example "book the tickets for 50% less"), or only asks an **information question** (for example "visa requirements for Japan?"), the supervisor replies through `reply_agent` instead of planning. A country, state, region or continent (Kerala, Europe, Southeast Asia) counts as a destination. Otherwise `parse_request`, `flight_agent`, `hotel_agent`, `weather_agent`, `itinerary_agent` and `budget_agent` run in a fixed order (unselected ones are skipped).
+5. **`human_approval_agent`** pauses the graph with LangGraph's `interrupt()`. The API returns the **draft itinerary and budget table** (`needs_approval: true`) instead of a final answer, and the UI shows **Approve** and **Request changes** buttons. (If *Review the draft* is unchecked, this step approves automatically and you get the final answer directly. After a page reload the UI asks `GET /api/pending` and shows the waiting draft again.)
 6. The browser calls `POST /api/approve`:
    - **Approve** → `final_agent` writes the final answer in 7 sections.
-   - **Request changes** (with feedback text) → `itinerary_agent` and `budget_agent` run again. The model sees the previous draft and **every change you have asked for so far**, so a second change does not undo the first. You get a new draft to review. This can repeat.
-7. State is checkpointed in **PostgreSQL** per `thread_id`. That is what lets a paused run be resumed later.
+   - **Request changes** (with feedback text) → `revise_trip_agent` re-reads the trip length and budget with your change applied ("make it 2 days" really changes the length, and flight fares are searched again for the new dates), then `itinerary_agent` and `budget_agent` run again. The model sees the previous draft and **every change you have asked for so far**, so a second change does not undo the first. You get a new draft to review. This can repeat.
+7. State is checkpointed in **PostgreSQL** per `thread_id` (through a connection pool that reconnects if the database drops a connection). That is what lets a paused run be resumed later and what gives follow-ups their memory.
 
 **Where to start reading the code:** `backend.py`, from the bottom up. `run_travel_agent()` / `resume_travel_agent()` → the graph definition (`graph.add_node(...)`) → each node function in the same order.
 
@@ -68,7 +69,7 @@ flowchart TD
     G -- "allowed" --> S["supervisor_agent<br/>picks specialists"]
     S -- "no destination or info-only: reply" --> RP
     RP --> R1([Reason or question shown in the UI])
-    S -- "ok" --> P[parse_request]
+    S -- "ok (follow-ups merged)" --> P[parse_request]
     P --> F[flight_agent]
     F --> H[hotel_agent]
     H --> W[weather_agent]
@@ -76,14 +77,16 @@ flowchart TD
     I --> BU[budget_agent]
     BU --> HA{{"human_approval_agent<br/>PAUSE: draft shown in the UI"}}
     HA -- "Approve (POST /api/approve)" --> FN[final_agent]
-    HA -- "Request changes + feedback" --> I
+    HA -- "Request changes + feedback" --> RV["revise_trip_agent<br/>re-read days and budget"]
+    RV -- "length changed: new fares" --> F
+    RV -- "otherwise" --> I
     FN --> R2([Final plan in Markdown])
 ```
 
 | Step (node in `backend.py`) | What it does | Uses |
 |---|---|---|
 | `input_guardrail_agent` | **First node.** Is this a travel-planning request? If not (general-knowledge question, unrelated, or harmful), it records the reason and the run goes to `reply_agent`. If the guardrail call itself fails, the request is allowed (fail-open). | fast LLM |
-| `supervisor_agent` | Runs only for allowed requests. Picks which specialists are needed and extracts trip constraints. If there is **no destination**, or the user only asks a general question about a place (visa rules, best time to visit), it sets `needs_clarification` with a reply and the run goes to `reply_agent`; no search agents run. If its own call fails, the full workflow is selected. | fast LLM |
+| `supervisor_agent` | Runs only for allowed requests. Picks which specialists are needed and extracts trip constraints. If there is **no destination**, or the user only asks a general question about a place (visa rules, best time to visit), it sets `needs_clarification` with a reply and the run goes to `reply_agent`; no search agents run. It also merges a follow-up ("make it cheaper") with the earlier trip request. If its own call fails, the full workflow is selected. | fast LLM |
 | `reply_agent` | Ends the run with a plain message: the guardrail's block reason, or the supervisor's question or redirect. | none |
 | `parse_request` | Turns free text into structured fields: destination, origin, `cities` (for multi-city trips), `trip_days`, `budget_inr`, `budget_level`, `arrival_airport`. | fast LLM (structured output) |
 | `flight_agent` | Looks up real **round-trip fares** for the chosen date and formats the best few options. If nothing is found, it writes a note telling the planner to use clearly labelled estimates. | `tools/flight_prices.py` → SerpApi Google Flights |
@@ -91,7 +94,8 @@ flowchart TD
 | `weather_agent` | Trip starts within 4 days → day-by-day forecast. Otherwise → today's weather as a climate hint. One call per city, in parallel; a failed city does not break the plan. | Weather **MCP** (ours) → OpenWeatherMap |
 | `itinerary_agent` | Writes the day-by-day plan and ends every day with a `Costs:` line. Real flight fares are deliberately **left out** of those lines. On a revision it receives the previous draft plus all requested changes. | strong LLM |
 | `budget_agent` | Reads the `Costs:` lines, **adds the flight fare** (fare × travellers), and sums everything **in Python** (LLMs add badly). | fast LLM (extraction) + code |
-| `human_approval_agent` | Calls `interrupt()` with the draft itinerary and budget table. The run stops here and resumes when `POST /api/approve` is called. Not wrapped in `try/except` on purpose: LangGraph uses an exception to pause. | none |
+| `revise_trip_agent` | After *Request changes*: re-reads trip length and budget with all your changes applied. If the length changed, the graph re-runs `flight_agent` (fares for the old dates are stale) and skips the hotel and weather searches; otherwise it goes straight to `itinerary_agent`. | fast LLM |
+| `human_approval_agent` | Calls `interrupt()` with the draft itinerary and budget table. The run stops here and resumes when `POST /api/approve` is called. Auto-approves when the user turned the review off. Not wrapped in `try/except` on purpose: LangGraph uses an exception to pause. | none |
 | `final_agent` | Writes the final answer in 7 sections (summary, flights, hotels, weather, itinerary, budget, recommendations) using the computed budget table. | strong LLM |
 
 **Fast vs strong LLM:** `build_llm("fast")` is a cheap model for the guardrail, supervisor, parsing and extraction; `build_llm("strong")` is the best model for the itinerary and final answer. Both come from `LLM_PROVIDER` (`groq` default, or `openai`).
@@ -164,6 +168,9 @@ Open **<http://127.0.0.1:8000>**. The first start takes longer: it connects to P
 5. **Try the guardrail.** Ask `what is the capital of Telangana`. It is blocked with a reason and never reaches the supervisor or the planning agents.
 6. **Try a vague request.** Send `book the cheapest tickets for me`. It passes the guardrail but names no destination, so the supervisor replies with a question (where, how many days, what budget) instead of making a plan.
 7. **Try an information question.** Send `visa requirements for Japan?`. You get a short reply inviting a trip request; no flights or hotels are searched.
+8. **Try a follow-up.** After a plan, send `make it cheaper`. It is applied to the same trip (the budget goes down), not treated as a new question.
+9. **Reload with a draft open.** The draft and its buttons come back.
+10. **Skip the review.** Untick *Review the draft before the final plan* and send a trip; you get the final answer without the approval step.
 
 More test prompts and expected results are in **[docs/TESTING.md](docs/TESTING.md)**.
 
@@ -176,6 +183,10 @@ uv run python test_hitl.py
 This runs the real pipeline end to end (it **uses live API calls and credits**) and checks eight things: the run pauses for approval; two revisions in a row both stay in the draft; approval produces the final answer; approving again (or an unknown trip) is rejected; a non-travel request is blocked; a request with no destination gets a question; an information question is redirected without running any agents; and "Europe" is accepted as a destination. It prints `PASS` / `FAIL` for each and `ALL HITL TESTS PASSED` at the end.
 
 Other quick checks:
+
+```bash
+uv run python test_routing.py          # 22 clear-cut prompts through the guardrail + supervisor only (cheap, no searches)
+```
 
 ```bash
 uv run python test.py                  # lists every MCP tool (Tavily, AviationStack, weather)
@@ -204,6 +215,7 @@ Deployed as a Docker web service from this repo's `Dockerfile`. Set the same var
 | The UI says **"No answer was returned."** | Your browser is running an old cached `script.js` that does not know about the approval step. Hard-refresh (Cmd/Ctrl + Shift + R). When you change `static/script.js` or `style.css`, bump the `?v=` number on their tags in `templates/index.html`. |
 | The UI says **"No itinerary is waiting for approval…"** or **"This request is already being processed."** | You approved a trip that is already finished, or clicked twice. Nothing is wrong; start a new trip, or wait for the first request. |
 | `ValueError: database url is missing` | `DATABASE_URL` is not set in `.env`. |
+| `RuntimeError: Cannot connect to PostgreSQL…` on start | The app waits about 15 seconds for the database and then stops with this message. Check `DATABASE_URL` and that the database is running. If the database drops a connection later, the pool reconnects by itself (no restart needed). |
 | `server does not support SSL` / connection refused on start | A local Postgres needs `?sslmode=disable` on the URL (see [step 3](#3-create-a-postgresql-database)), and the container must be running (`docker ps`). |
 | `Address already in use` on port 8000 | Another copy of the app is running. Stop it, or use `--port 8001`. |
 | Hotels say "live search is temporarily unavailable" | The Tavily call failed (check `TAVILY_API_KEY` and quota). The plan still completes with labelled general advice; the error is printed in the server log as `HOTEL AGENT MCP ERROR`. |
@@ -261,7 +273,8 @@ Note: `flight_tool.py` also accepts the misspelt `DEAFAULT_ORIGIN_IATA` as a fal
 ├── static/script.js, style.css    Frontend: sends the request, shows the draft with Approve /
 │                                  Request changes buttons, calls /api/approve
 ├── docs/                          architecture.svg (editable source) / architecture.png (rendered)
-├── test_hitl.py                   End-to-end test of the pause / revise / approve / guardrail flow
+├── test_hitl.py                   End-to-end test of the pause / revise / approve / guardrail / memory flow
+├── test_routing.py                Cheap routing test: guardrail + supervisor only (22 prompts)
 ├── test.py                        Prints every tool the MCP client can see (a quick MCP check)
 ├── mcp_client_test.py             Old scratch file from when MCP was first tried; safe to ignore
 ├── main.py                        Empty `uv init` stub; safe to ignore
@@ -304,7 +317,7 @@ Note: `flight_tool.py` also accepts the misspelt `DEAFAULT_ORIGIN_IATA` as a fal
   "start_date": "2026-12-05" }
 ```
 
-`start_date` is optional (`YYYY-MM-DD`). `thread_id` keys the saved state in PostgreSQL; the browser keeps it in `localStorage`, and one is created if you send `null`.
+`start_date` is optional (`YYYY-MM-DD`). `review` is optional (default `true`); send `false` to skip the approval step and get the final answer directly. `thread_id` keys the saved state in PostgreSQL; the browser keeps it in `localStorage`, and one is created if you send `null`.
 
 There are **two possible responses**:
 
@@ -328,6 +341,10 @@ There are **two possible responses**:
 ```
 
 **c) The supervisor replies instead of planning** (no pause): same shape, with `"guardrail_allowed": true`, `"needs_clarification": true`, and `answer` holding the question ("Where would you like to go, for how many days, and what is your budget?") or, for an information-only question, an invitation to send a trip request.
+
+### `GET /api/pending?thread_id=…`: is a draft waiting?
+
+Returns `{"pending": false}`, or the waiting draft: `{"pending": true, "needs_approval": true, "query": "…", "draft_itinerary": "…", "budget_table": "…"}`. The UI calls it on page load so a reload does not lose the draft.
 
 ### `POST /api/approve`: answer the approval question
 
@@ -390,16 +407,14 @@ LangGraph (supervisor, conditional edges, `interrupt()`) + LangChain · Groq or 
 | `main` | Baseline |
 | `multi-agent-without-mcp` | The pipeline using direct tool clients |
 | `multi-agent-with-mcp` | Tavily + weather through MCP, SerpApi fares, start-date picker, weather agent, budget fix |
-| `multi-agent-supervisor-guardrails-hitl` | **Current work (this README):** separate input-guardrail node, supervisor with conditional routing and clarification questions, `reply_agent`, hotel/weather error handling, human-in-the-loop approval, `/api/approve` and the approval UI |
+| `multi-agent-supervisor-guardrails-hitl` | **Current work (this README):** separate input-guardrail node, supervisor with conditional routing, clarification and follow-up memory, `reply_agent`, hotel/weather error handling, human-in-the-loop approval with revise step, optional review, pending-draft restore, connection pool, `/api/approve` and `/api/pending` |
 
 ---
 
 ## Known limitations
 
-- **Every trip needs a click.** The run always pauses for approval before the final answer. There is no "skip review" option yet.
-- **A pending draft does not survive a page reload in the UI.** The run stays paused in PostgreSQL, but the buttons are gone; start a new trip. (The `thread_id` is kept, so the state is not lost, only the UI to continue it.)
 - **Approval with a narrow plan is untested.** If the supervisor skips `itinerary_agent` (for example a flights-only request), the draft shown for approval may be empty, and *Request changes* always loops back to `itinerary_agent`.
-- **No conversation memory.** Each message is handled on its own. A follow-up such as "make it cheaper" or "ok, book it" has no destination, so the supervisor asks the question again instead of using the earlier message.
+- **Follow-up memory only remembers the last trip request** on the same conversation (thread). "Ok, book it" re-plans that trip; the app cannot book tickets.
 - **The guardrail is an LLM judgement.** It blocks general-knowledge questions and unrelated requests, but borderline phrasing can slip through or be blocked wrongly. If the guardrail call itself fails, the request is allowed.
 - **Prices are estimates.** Hotel and cost figures come from web snippets and LLM estimates; fares come from Google Flights via SerpApi. Always verify before booking.
 - **Weather is only a forecast within ~5 days.** Further out it is a climate hint.
@@ -411,12 +426,10 @@ LangGraph (supervisor, conditional edges, `interrupt()`) + LangChain · Groq or 
 
 1. **Make one agent really choose its tools.** E.g. turn `weather_agent` into a LangGraph ReAct agent that gets the MCP tools from `client.get_tools()` and decides which to call.
 2. **Run flights, hotels and weather in parallel** (a LangGraph fan-out) instead of one after another.
-3. **Follow-up memory** (pass the previous request into the guardrail, supervisor and parse step so "make it cheaper" works).
-4. **Optional approval.** A "review the draft before finalizing" checkbox, and restoring a pending draft after a page reload.
-5. **Stream real progress** to the UI instead of the timer-based progress card.
-6. Use or remove the AviationStack MCP.
-7. From/To airport autocomplete in the UI (would avoid airport-code mistakes at the source).
-8. Automated tests for the guardrail with a set of borderline prompts.
+3. **Stream real progress** to the UI instead of the timer-based progress card.
+4. Use or remove the AviationStack MCP.
+5. From/To airport autocomplete in the UI (would avoid airport-code mistakes at the source).
+6. Re-run the hotel and weather searches too when a revision changes the destination.
 
 ## License
 
