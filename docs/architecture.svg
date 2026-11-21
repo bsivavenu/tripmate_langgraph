@@ -1,178 +1,224 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 920" width="1500" height="920" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1070" width="1500" height="1070" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif">
   <defs>
     <marker id="aInd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4338CA"/></marker>
     <marker id="aTeal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0E7490"/></marker>
     <marker id="aGray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6B7280"/></marker>
     <marker id="aPur" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7C3AED"/></marker>
     <marker id="aAmb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B45309"/></marker>
+    <marker id="aGrn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#15803D"/></marker>
+    <marker id="aRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker>
   </defs>
 
-  <rect width="1500" height="920" fill="#FFFFFF"/>
+  <rect width="1500" height="1070" fill="#FFFFFF"/>
 
   <!-- title -->
   <text x="40" y="38" font-size="24" font-weight="700" fill="#111827">TripMate · architecture</text>
-  <text x="40" y="60" font-size="13" fill="#6B7280">Multi-agent LangGraph pipeline that uses MCP servers as tools · branch multi-agent-with-mcp</text>
+  <text x="40" y="60" font-size="13" fill="#6B7280">Supervisor + input guardrail, a multi-agent LangGraph pipeline with human-in-the-loop approval, MCP servers as tools · branch multi-agent-supervisor-guardrails-hitl</text>
 
   <!-- top row -->
-  <rect x="40" y="80" width="360" height="70" rx="10" fill="#F9FAFB" stroke="#9CA3AF"/>
-  <text x="220" y="105" text-anchor="middle" font-size="15" font-weight="700" fill="#111827">Browser UI</text>
-  <text x="220" y="124" text-anchor="middle" font-size="12" fill="#4B5563">index.html · script.js · style.css</text>
-  <text x="220" y="140" text-anchor="middle" font-size="12" fill="#4B5563">trip text + start-date picker</text>
+  <rect x="40" y="80" width="380" height="70" rx="10" fill="#F9FAFB" stroke="#9CA3AF"/>
+  <text x="230" y="105" text-anchor="middle" font-size="15" font-weight="700" fill="#111827">Browser UI</text>
+  <text x="230" y="124" text-anchor="middle" font-size="12" fill="#4B5563">index.html · script.js · style.css</text>
+  <text x="230" y="140" text-anchor="middle" font-size="12" fill="#4B5563">trip text + start date · Approve / Request changes</text>
 
-  <rect x="500" y="80" width="360" height="70" rx="10" fill="#F9FAFB" stroke="#9CA3AF"/>
-  <text x="680" y="105" text-anchor="middle" font-size="15" font-weight="700" fill="#111827">FastAPI · app.py</text>
-  <text x="680" y="124" text-anchor="middle" font-size="12" fill="#4B5563">POST /api/plan</text>
-  <text x="680" y="140" text-anchor="middle" font-size="12" fill="#4B5563">{ query, thread_id, start_date }</text>
+  <rect x="500" y="80" width="420" height="70" rx="10" fill="#F9FAFB" stroke="#9CA3AF"/>
+  <text x="710" y="101" text-anchor="middle" font-size="15" font-weight="700" fill="#111827">FastAPI · app.py</text>
+  <text x="710" y="119" text-anchor="middle" font-size="12" fill="#4B5563">POST /api/plan  { query, thread_id, start_date }</text>
+  <text x="710" y="137" text-anchor="middle" font-size="12" fill="#4B5563">POST /api/approve  { thread_id, approved, feedback }</text>
 
   <rect x="1100" y="80" width="360" height="70" rx="10" fill="#FFFBEB" stroke="#B45309"/>
   <text x="1280" y="105" text-anchor="middle" font-size="15" font-weight="700" fill="#78350F">PostgreSQL</text>
   <text x="1280" y="124" text-anchor="middle" font-size="12" fill="#78350F">PostgresSaver checkpoints</text>
   <text x="1280" y="140" text-anchor="middle" font-size="12" fill="#78350F">one thread per thread_id</text>
 
-  <line x1="400" y1="104" x2="498" y2="104" stroke="#4B5563" stroke-width="1.6" marker-end="url(#aGray)"/>
-  <line x1="498" y1="130" x2="402" y2="130" stroke="#4B5563" stroke-width="1.6" marker-end="url(#aGray)"/>
-  <text x="450" y="98" text-anchor="middle" font-size="11" fill="#4B5563">request</text>
-  <text x="450" y="146" text-anchor="middle" font-size="11" fill="#4B5563">plan</text>
+  <line x1="420" y1="104" x2="498" y2="104" stroke="#4B5563" stroke-width="1.6" marker-end="url(#aGray)"/>
+  <line x1="498" y1="130" x2="422" y2="130" stroke="#4B5563" stroke-width="1.6" marker-end="url(#aGray)"/>
+  <text x="460" y="98" text-anchor="middle" font-size="11" fill="#4B5563">request</text>
+  <text x="460" y="146" text-anchor="middle" font-size="11" fill="#4B5563">plan / draft</text>
 
-  <line x1="680" y1="150" x2="680" y2="208" stroke="#4338CA" stroke-width="1.8" marker-end="url(#aInd)"/>
-  <text x="692" y="184" font-size="12" fill="#4338CA">run_travel_agent()</text>
+  <line x1="710" y1="150" x2="710" y2="208" stroke="#4338CA" stroke-width="1.8" marker-end="url(#aInd)"/>
+  <text x="722" y="178" font-size="12" fill="#4338CA">run_travel_agent()</text>
+  <text x="722" y="196" font-size="12" fill="#4338CA">resume_travel_agent()</text>
 
   <line x1="1280" y1="208" x2="1280" y2="152" stroke="#B45309" stroke-width="1.8" marker-end="url(#aAmb)"/>
-  <text x="1292" y="184" font-size="12" fill="#B45309">save / resume state</text>
+  <text x="1292" y="184" font-size="12" fill="#B45309">save / pause / resume state</text>
 
   <!-- LangGraph container -->
-  <rect x="40" y="210" width="1420" height="200" rx="14" fill="#F5F7FF" stroke="#A5B4FC" stroke-width="1.5"/>
+  <rect x="40" y="210" width="1420" height="330" rx="14" fill="#F5F7FF" stroke="#A5B4FC" stroke-width="1.5"/>
   <text x="60" y="236" font-size="14" font-weight="700" fill="#3730A3">LangGraph pipeline · backend.py</text>
-  <text x="330" y="236" font-size="12" fill="#6366F1">StateGraph with one shared TravelState; steps run one after another</text>
+  <text x="330" y="236" font-size="12" fill="#6366F1">StateGraph with one shared TravelState</text>
 
-  <!-- nodes -->
+  <!-- row A nodes -->
   <g font-size="12" text-anchor="middle">
-    <!-- 0 -->
-    <rect x="70" y="260" width="170" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
-    <text x="155" y="284" font-size="14" font-weight="700" fill="#312E81">parse_request</text>
-    <text x="155" y="304" fill="#4B5563">Structured trip fields</text>
-    <text x="155" y="320" fill="#4B5563">(cities, days, budget)</text>
-    <rect x="115" y="338" width="80" height="22" rx="11" fill="#EDE9FE" stroke="#7C3AED"/><text x="155" y="353" fill="#5B21B6" font-size="11" font-weight="600">fast LLM</text>
-    <!-- 1 -->
-    <rect x="270" y="260" width="170" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
-    <text x="355" y="284" font-size="14" font-weight="700" fill="#312E81">flight_agent</text>
-    <text x="355" y="304" fill="#4B5563">Real round-trip fares</text>
-    <text x="355" y="320" fill="#4B5563">for the chosen date</text>
-    <rect x="310" y="338" width="90" height="22" rx="11" fill="#F3F4F6" stroke="#6B7280"/><text x="355" y="353" fill="#374151" font-size="11" font-weight="600">tool · API</text>
-    <!-- 2 -->
-    <rect x="470" y="260" width="170" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
-    <text x="555" y="284" font-size="14" font-weight="700" fill="#312E81">hotel_agent</text>
-    <text x="555" y="304" fill="#4B5563">Hotel search per city</text>
-    <text x="555" y="320" fill="#4B5563">(Tavily)</text>
-    <rect x="515" y="338" width="80" height="22" rx="11" fill="#ECFEFF" stroke="#0E7490"/><text x="555" y="353" fill="#155E75" font-size="11" font-weight="600">MCP</text>
-    <!-- 3 -->
-    <rect x="670" y="260" width="170" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
-    <text x="755" y="284" font-size="14" font-weight="700" fill="#312E81">weather_agent</text>
-    <text x="755" y="304" fill="#4B5563">Forecast if trip ≤ 4 days</text>
-    <text x="755" y="320" fill="#4B5563">away, else today's weather</text>
-    <rect x="715" y="338" width="80" height="22" rx="11" fill="#ECFEFF" stroke="#0E7490"/><text x="755" y="353" fill="#155E75" font-size="11" font-weight="600">MCP</text>
-    <!-- 4 -->
-    <rect x="870" y="260" width="170" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
-    <text x="955" y="284" font-size="14" font-weight="700" fill="#312E81">itinerary_agent</text>
-    <text x="955" y="304" fill="#4B5563">Day-by-day plan</text>
-    <text x="955" y="320" fill="#4B5563">with daily costs</text>
-    <rect x="905" y="338" width="100" height="22" rx="11" fill="#EDE9FE" stroke="#7C3AED"/><text x="955" y="353" fill="#5B21B6" font-size="11" font-weight="600">strong LLM</text>
-    <!-- 5 -->
-    <rect x="1070" y="260" width="170" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
-    <text x="1155" y="284" font-size="14" font-weight="700" fill="#312E81">budget_agent</text>
-    <text x="1155" y="304" fill="#4B5563">Adds up costs + flight</text>
-    <text x="1155" y="320" fill="#4B5563">in code, not by the LLM</text>
-    <rect x="1115" y="338" width="80" height="22" rx="11" fill="#EDE9FE" stroke="#7C3AED"/><text x="1155" y="353" fill="#5B21B6" font-size="11" font-weight="600">fast LLM</text>
-    <!-- 6 -->
-    <rect x="1270" y="260" width="170" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
-    <text x="1355" y="284" font-size="14" font-weight="700" fill="#312E81">final_agent</text>
-    <text x="1355" y="304" fill="#4B5563">Writes the final answer</text>
-    <text x="1355" y="320" fill="#4B5563">(7 sections)</text>
-    <rect x="1305" y="338" width="100" height="22" rx="11" fill="#EDE9FE" stroke="#7C3AED"/><text x="1355" y="353" fill="#5B21B6" font-size="11" font-weight="600">strong LLM</text>
+    <!-- supervisor -->
+    <rect x="70" y="262" width="160" height="110" rx="10" fill="#F0FDF4" stroke="#15803D" stroke-width="2"/>
+    <text x="150" y="286" font-size="14" font-weight="700" fill="#14532D">supervisor_agent</text>
+    <text x="150" y="306" fill="#4B5563">Input guardrail, then</text>
+    <text x="150" y="322" fill="#4B5563">picks the specialists</text>
+    <rect x="95" y="338" width="110" height="22" rx="11" fill="#EDE9FE" stroke="#7C3AED"/><text x="150" y="353" fill="#5B21B6" font-size="11" font-weight="600">fast LLM (x2)</text>
+    <!-- parse -->
+    <rect x="270" y="262" width="160" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+    <text x="350" y="286" font-size="14" font-weight="700" fill="#312E81">parse_request</text>
+    <text x="350" y="306" fill="#4B5563">Structured trip fields</text>
+    <text x="350" y="322" fill="#4B5563">(cities, days, budget)</text>
+    <rect x="310" y="338" width="80" height="22" rx="11" fill="#EDE9FE" stroke="#7C3AED"/><text x="350" y="353" fill="#5B21B6" font-size="11" font-weight="600">fast LLM</text>
+    <!-- flight -->
+    <rect x="470" y="262" width="160" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+    <text x="550" y="286" font-size="14" font-weight="700" fill="#312E81">flight_agent</text>
+    <text x="550" y="306" fill="#4B5563">Real round-trip fares</text>
+    <text x="550" y="322" fill="#4B5563">for the chosen date</text>
+    <rect x="505" y="338" width="90" height="22" rx="11" fill="#F3F4F6" stroke="#6B7280"/><text x="550" y="353" fill="#374151" font-size="11" font-weight="600">tool · API</text>
+    <!-- hotel -->
+    <rect x="670" y="262" width="160" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+    <text x="750" y="286" font-size="14" font-weight="700" fill="#312E81">hotel_agent</text>
+    <text x="750" y="306" fill="#4B5563">Hotel search per city</text>
+    <text x="750" y="322" fill="#4B5563">(Tavily)</text>
+    <rect x="710" y="338" width="80" height="22" rx="11" fill="#ECFEFF" stroke="#0E7490"/><text x="750" y="353" fill="#155E75" font-size="11" font-weight="600">MCP</text>
+    <!-- weather -->
+    <rect x="870" y="262" width="160" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+    <text x="950" y="286" font-size="14" font-weight="700" fill="#312E81">weather_agent</text>
+    <text x="950" y="306" fill="#4B5563">Forecast if ≤ 4 days away,</text>
+    <text x="950" y="322" fill="#4B5563">else today's weather</text>
+    <rect x="910" y="338" width="80" height="22" rx="11" fill="#ECFEFF" stroke="#0E7490"/><text x="950" y="353" fill="#155E75" font-size="11" font-weight="600">MCP</text>
+    <!-- itinerary -->
+    <rect x="1070" y="262" width="160" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+    <text x="1150" y="286" font-size="14" font-weight="700" fill="#312E81">itinerary_agent</text>
+    <text x="1150" y="306" fill="#4B5563">Day-by-day plan with</text>
+    <text x="1150" y="322" fill="#4B5563">daily costs (uses feedback)</text>
+    <rect x="1100" y="338" width="100" height="22" rx="11" fill="#EDE9FE" stroke="#7C3AED"/><text x="1150" y="353" fill="#5B21B6" font-size="11" font-weight="600">strong LLM</text>
+    <!-- budget -->
+    <rect x="1270" y="262" width="160" height="110" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+    <text x="1350" y="286" font-size="14" font-weight="700" fill="#312E81">budget_agent</text>
+    <text x="1350" y="306" fill="#4B5563">Adds up costs + flight</text>
+    <text x="1350" y="322" fill="#4B5563">in code, not by the LLM</text>
+    <rect x="1310" y="338" width="80" height="22" rx="11" fill="#EDE9FE" stroke="#7C3AED"/><text x="1350" y="353" fill="#5B21B6" font-size="11" font-weight="600">fast LLM</text>
   </g>
-  <!-- node to node -->
+
+  <!-- row A arrows -->
   <g stroke="#4338CA" stroke-width="1.8" marker-end="url(#aInd)">
-    <line x1="240" y1="315" x2="268" y2="315"/><line x1="440" y1="315" x2="468" y2="315"/>
-    <line x1="640" y1="315" x2="668" y2="315"/><line x1="840" y1="315" x2="868" y2="315"/>
-    <line x1="1040" y1="315" x2="1068" y2="315"/><line x1="1240" y1="315" x2="1268" y2="315"/>
+    <line x1="430" y1="317" x2="468" y2="317"/><line x1="630" y1="317" x2="668" y2="317"/>
+    <line x1="830" y1="317" x2="868" y2="317"/><line x1="1030" y1="317" x2="1068" y2="317"/>
+    <line x1="1230" y1="317" x2="1268" y2="317"/>
   </g>
+  <line x1="230" y1="317" x2="268" y2="317" stroke="#15803D" stroke-width="1.8" marker-end="url(#aGrn)"/>
+  <text x="249" y="308" text-anchor="middle" font-size="10" fill="#15803D">allowed</text>
 
-  <!-- LLM bus -->
-  <g stroke="#7C3AED" stroke-width="1.5" stroke-dasharray="5 4" fill="none">
-    <path d="M155,370 L155,442 L1250,442" />
-    <path d="M955,370 L955,442"/><path d="M1155,370 L1155,442"/><path d="M1355,370 L1355,442 L1250,442"/>
-    <path d="M1250,442 L1250,468" marker-end="url(#aPur)"/>
+  <!-- row B nodes -->
+  <g font-size="12" text-anchor="middle">
+    <!-- blocked -->
+    <rect x="60" y="410" width="190" height="90" rx="10" fill="#FEF2F2" stroke="#DC2626" stroke-width="2"/>
+    <text x="155" y="434" font-size="13" font-weight="700" fill="#7F1D1D">guardrail_blocked_agent</text>
+    <text x="155" y="454" fill="#4B5563">Returns the block reason</text>
+    <text x="155" y="470" fill="#4B5563">as the answer (no LLM)</text>
+    <!-- final -->
+    <rect x="1000" y="410" width="170" height="90" rx="10" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+    <text x="1085" y="434" font-size="14" font-weight="700" fill="#312E81">final_agent</text>
+    <text x="1085" y="454" fill="#4B5563">Writes the final answer</text>
+    <text x="1085" y="470" fill="#4B5563">(7 sections)</text>
+    <rect x="1035" y="475" width="100" height="20" rx="10" fill="#EDE9FE" stroke="#7C3AED"/><text x="1085" y="489" fill="#5B21B6" font-size="11" font-weight="600">strong LLM</text>
+    <!-- human approval -->
+    <rect x="1240" y="410" width="190" height="90" rx="10" fill="#FFFBEB" stroke="#B45309" stroke-width="2.5"/>
+    <text x="1335" y="434" font-size="13" font-weight="700" fill="#78350F">human_approval_agent</text>
+    <text x="1335" y="454" fill="#4B5563">interrupt(): pauses the run</text>
+    <text x="1335" y="470" fill="#4B5563">until the user answers</text>
+    <rect x="1285" y="475" width="100" height="20" rx="10" fill="#FEF3C7" stroke="#B45309"/><text x="1335" y="489" fill="#78350F" font-size="11" font-weight="600">human in loop</text>
   </g>
-  <text x="170" y="436" font-size="11" fill="#7C3AED">LLM calls</text>
+  <text x="155" y="522" text-anchor="middle" font-size="11" fill="#6B7280">END · reason shown in the UI</text>
+  <text x="1085" y="522" text-anchor="middle" font-size="11" fill="#6B7280">END · answer shown in the UI</text>
 
-  <!-- level 1 -->
-  <rect x="200" y="470" width="260" height="64" rx="10" fill="#F9FAFB" stroke="#6B7280"/>
-  <text x="330" y="494" text-anchor="middle" font-size="12" font-weight="700" fill="#111827">flight_prices.py + flight_tool.py</text>
-  <text x="330" y="512" text-anchor="middle" font-size="12" fill="#4B5563">airport lookup · 6 h fare cache</text>
-  <line x1="355" y1="370" x2="355" y2="468" stroke="#4338CA" stroke-width="1.6" marker-end="url(#aInd)"/>
+  <!-- supervisor -> blocked -->
+  <line x1="150" y1="372" x2="150" y2="408" stroke="#DC2626" stroke-width="1.8" marker-end="url(#aRed)"/>
+  <text x="140" y="396" text-anchor="end" font-size="10" fill="#DC2626">blocked</text>
 
-  <rect x="470" y="470" width="600" height="64" rx="10" fill="#ECFEFF" stroke="#0E7490" stroke-width="1.5"/>
-  <text x="770" y="494" text-anchor="middle" font-size="14" font-weight="700" fill="#155E75">mcp_client.py · MultiServerMCPClient</text>
-  <text x="770" y="513" text-anchor="middle" font-size="12" fill="#155E75">langchain-mcp-adapters · one client, three MCP servers</text>
-  <line x1="555" y1="370" x2="555" y2="468" stroke="#0E7490" stroke-width="1.6" marker-end="url(#aTeal)"/>
-  <line x1="755" y1="370" x2="755" y2="468" stroke="#0E7490" stroke-width="1.6" marker-end="url(#aTeal)"/>
+  <!-- budget -> human approval -->
+  <line x1="1335" y1="372" x2="1335" y2="408" stroke="#4338CA" stroke-width="1.8" marker-end="url(#aInd)"/>
+  <!-- human approval -> final : approved -->
+  <line x1="1240" y1="455" x2="1172" y2="455" stroke="#15803D" stroke-width="1.8" marker-end="url(#aGrn)"/>
+  <text x="1206" y="446" text-anchor="middle" font-size="10" fill="#15803D">approved</text>
+  <!-- human approval -> itinerary : revise loop -->
+  <path d="M1430,440 L1448,440 L1448,246 L1150,246 L1150,260" fill="none" stroke="#B45309" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#aAmb)"/>
+  <text x="1165" y="241" font-size="11" fill="#B45309">request changes: re-run itinerary + budget</text>
 
   <!-- LLM provider -->
-  <rect x="1100" y="470" width="360" height="130" rx="10" fill="#F5F3FF" stroke="#7C3AED" stroke-width="1.5"/>
-  <text x="1280" y="494" text-anchor="middle" font-size="14" font-weight="700" fill="#5B21B6">LLM provider</text>
-  <text x="1280" y="514" text-anchor="middle" font-size="12" fill="#5B21B6">LLM_PROVIDER = groq | openai</text>
-  <text x="1280" y="540" text-anchor="middle" font-size="12" fill="#4B5563">fast model: parse_request, budget_agent</text>
-  <text x="1280" y="558" text-anchor="middle" font-size="12" fill="#4B5563">strong model: itinerary_agent, final_agent</text>
-  <text x="1280" y="582" text-anchor="middle" font-size="11" fill="#6B7280">structured output for parsing and budget</text>
+  <rect x="1210" y="580" width="250" height="110" rx="10" fill="#F5F3FF" stroke="#7C3AED" stroke-width="1.5"/>
+  <text x="1335" y="602" text-anchor="middle" font-size="14" font-weight="700" fill="#5B21B6">LLM provider</text>
+  <text x="1335" y="620" text-anchor="middle" font-size="11" fill="#5B21B6">LLM_PROVIDER = groq | openai</text>
+  <text x="1335" y="642" text-anchor="middle" font-size="11" fill="#4B5563">fast: supervisor · parse_request · budget</text>
+  <text x="1335" y="658" text-anchor="middle" font-size="11" fill="#4B5563">strong: itinerary · final</text>
+  <text x="1335" y="678" text-anchor="middle" font-size="11" fill="#6B7280">structured output for parse + budget</text>
+  <line x1="1335" y1="540" x2="1335" y2="578" stroke="#7C3AED" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#aPur)"/>
+  <text x="1347" y="562" font-size="11" fill="#7C3AED">LLM calls</text>
+
+  <!-- level 1 -->
+  <rect x="420" y="580" width="260" height="64" rx="10" fill="#F9FAFB" stroke="#6B7280"/>
+  <text x="550" y="604" text-anchor="middle" font-size="12" font-weight="700" fill="#111827">flight_prices.py + flight_tool.py</text>
+  <text x="550" y="622" text-anchor="middle" font-size="12" fill="#4B5563">airport lookup · 6 h fare cache</text>
+  <line x1="550" y1="372" x2="550" y2="578" stroke="#4338CA" stroke-width="1.6" marker-end="url(#aInd)"/>
+
+  <rect x="700" y="580" width="480" height="64" rx="10" fill="#ECFEFF" stroke="#0E7490" stroke-width="1.5"/>
+  <text x="940" y="604" text-anchor="middle" font-size="14" font-weight="700" fill="#155E75">mcp_client.py · MultiServerMCPClient</text>
+  <text x="940" y="623" text-anchor="middle" font-size="12" fill="#155E75">langchain-mcp-adapters · one client, three MCP servers</text>
+  <line x1="750" y1="372" x2="750" y2="578" stroke="#0E7490" stroke-width="1.6" marker-end="url(#aTeal)"/>
+  <line x1="950" y1="372" x2="950" y2="578" stroke="#0E7490" stroke-width="1.6" marker-end="url(#aTeal)"/>
 
   <!-- level 3 -->
-  <rect x="240" y="590" width="220" height="64" rx="10" fill="#F3F4F6" stroke="#6B7280"/>
-  <text x="350" y="614" text-anchor="middle" font-size="13" font-weight="700" fill="#111827">SerpApi · Google Flights</text>
-  <text x="350" y="633" text-anchor="middle" font-size="12" fill="#4B5563">real round-trip fares</text>
-  <line x1="340" y1="534" x2="340" y2="588" stroke="#6B7280" stroke-width="1.6" marker-end="url(#aGray)"/>
+  <rect x="440" y="680" width="220" height="64" rx="10" fill="#F3F4F6" stroke="#6B7280"/>
+  <text x="550" y="704" text-anchor="middle" font-size="13" font-weight="700" fill="#111827">SerpApi · Google Flights</text>
+  <text x="550" y="723" text-anchor="middle" font-size="12" fill="#4B5563">real round-trip fares</text>
+  <line x1="550" y1="644" x2="550" y2="678" stroke="#6B7280" stroke-width="1.6" marker-end="url(#aGray)"/>
 
-  <rect x="470" y="590" width="180" height="64" rx="10" fill="#ECFEFF" stroke="#0E7490" stroke-width="1.5"/>
-  <text x="560" y="612" text-anchor="middle" font-size="13" font-weight="700" fill="#155E75">Tavily MCP</text>
-  <text x="560" y="629" text-anchor="middle" font-size="11" fill="#155E75">remote server</text>
-  <text x="560" y="644" text-anchor="middle" font-size="11" fill="#155E75">streamable_http · web search</text>
-  <line x1="560" y1="534" x2="560" y2="588" stroke="#0E7490" stroke-width="1.6" marker-end="url(#aTeal)"/>
+  <rect x="700" y="680" width="150" height="64" rx="10" fill="#ECFEFF" stroke="#0E7490" stroke-width="1.5"/>
+  <text x="775" y="702" text-anchor="middle" font-size="13" font-weight="700" fill="#155E75">Tavily MCP</text>
+  <text x="775" y="719" text-anchor="middle" font-size="11" fill="#155E75">remote server</text>
+  <text x="775" y="734" text-anchor="middle" font-size="11" fill="#155E75">streamable_http</text>
+  <line x1="775" y1="644" x2="775" y2="678" stroke="#0E7490" stroke-width="1.6" marker-end="url(#aTeal)"/>
 
-  <rect x="680" y="590" width="180" height="64" rx="10" fill="#ECFEFF" stroke="#0E7490" stroke-width="2.5"/>
-  <text x="770" y="612" text-anchor="middle" font-size="13" font-weight="700" fill="#155E75">Weather MCP (yours)</text>
-  <text x="770" y="629" text-anchor="middle" font-size="11" fill="#155E75">custom_weather_mcp_server.py</text>
-  <text x="770" y="644" text-anchor="middle" font-size="11" fill="#155E75">local stdio · 2 tools</text>
-  <line x1="770" y1="534" x2="770" y2="588" stroke="#0E7490" stroke-width="1.6" marker-end="url(#aTeal)"/>
+  <rect x="870" y="680" width="150" height="64" rx="10" fill="#ECFEFF" stroke="#0E7490" stroke-width="2.5"/>
+  <text x="945" y="702" text-anchor="middle" font-size="13" font-weight="700" fill="#155E75">Weather MCP</text>
+  <text x="945" y="719" text-anchor="middle" font-size="11" fill="#155E75">our own server · stdio</text>
+  <text x="945" y="734" text-anchor="middle" font-size="11" fill="#155E75">2 tools</text>
+  <line x1="945" y1="644" x2="945" y2="678" stroke="#0E7490" stroke-width="1.6" marker-end="url(#aTeal)"/>
 
-  <rect x="890" y="590" width="180" height="64" rx="10" fill="#F9FAFB" stroke="#0E7490" stroke-dasharray="6 4"/>
-  <text x="980" y="612" text-anchor="middle" font-size="13" font-weight="700" fill="#155E75">AviationStack MCP</text>
-  <text x="980" y="629" text-anchor="middle" font-size="11" fill="#155E75">uvx package · local stdio</text>
-  <text x="980" y="644" text-anchor="middle" font-size="11" fill="#6B7280">connected, not used by the graph</text>
-  <line x1="980" y1="534" x2="980" y2="588" stroke="#0E7490" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aTeal)"/>
+  <rect x="1040" y="680" width="140" height="64" rx="10" fill="#F9FAFB" stroke="#0E7490" stroke-dasharray="6 4"/>
+  <text x="1110" y="702" text-anchor="middle" font-size="13" font-weight="700" fill="#155E75">AviationStack MCP</text>
+  <text x="1110" y="719" text-anchor="middle" font-size="11" fill="#155E75">uvx · local stdio</text>
+  <text x="1110" y="734" text-anchor="middle" font-size="11" fill="#6B7280">connected, unused</text>
+  <line x1="1110" y1="644" x2="1110" y2="678" stroke="#0E7490" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aTeal)"/>
 
   <!-- level 4 -->
-  <rect x="680" y="700" width="180" height="56" rx="10" fill="#F3F4F6" stroke="#6B7280"/>
-  <text x="770" y="724" text-anchor="middle" font-size="13" font-weight="700" fill="#111827">OpenWeatherMap API</text>
-  <text x="770" y="742" text-anchor="middle" font-size="11" fill="#4B5563">current + 5-day forecast</text>
-  <line x1="770" y1="654" x2="770" y2="698" stroke="#6B7280" stroke-width="1.6" marker-end="url(#aGray)"/>
+  <rect x="870" y="780" width="150" height="56" rx="10" fill="#F3F4F6" stroke="#6B7280"/>
+  <text x="945" y="804" text-anchor="middle" font-size="13" font-weight="700" fill="#111827">OpenWeatherMap</text>
+  <text x="945" y="822" text-anchor="middle" font-size="11" fill="#4B5563">current + 5-day forecast</text>
+  <line x1="945" y1="744" x2="945" y2="778" stroke="#6B7280" stroke-width="1.6" marker-end="url(#aGray)"/>
 
-  <rect x="890" y="700" width="180" height="56" rx="10" fill="#F9FAFB" stroke="#6B7280" stroke-dasharray="6 4"/>
-  <text x="980" y="724" text-anchor="middle" font-size="13" font-weight="700" fill="#6B7280">AviationStack API</text>
-  <text x="980" y="742" text-anchor="middle" font-size="11" fill="#6B7280">flight status</text>
-  <line x1="980" y1="654" x2="980" y2="698" stroke="#6B7280" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aGray)"/>
+  <rect x="1040" y="780" width="140" height="56" rx="10" fill="#F9FAFB" stroke="#6B7280" stroke-dasharray="6 4"/>
+  <text x="1110" y="804" text-anchor="middle" font-size="13" font-weight="700" fill="#6B7280">AviationStack API</text>
+  <text x="1110" y="822" text-anchor="middle" font-size="11" fill="#6B7280">flight status</text>
+  <line x1="1110" y1="744" x2="1110" y2="778" stroke="#6B7280" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#aGray)"/>
 
   <!-- legend -->
-  <g transform="translate(0,30)">
-  <rect x="40" y="640" width="400" height="134" rx="10" fill="#FFFFFF" stroke="#E5E7EB"/>
-  <text x="56" y="662" font-size="12" font-weight="700" fill="#374151">Legend</text>
-  <rect x="56" y="672" width="16" height="12" rx="3" fill="#EEF2FF" stroke="#4F46E5"/><text x="82" y="682" font-size="12" fill="#4B5563">LangGraph step (node)</text>
-  <rect x="56" y="692" width="16" height="12" rx="3" fill="#ECFEFF" stroke="#0E7490"/><text x="82" y="702" font-size="12" fill="#4B5563">MCP client or server</text>
-  <rect x="56" y="712" width="16" height="12" rx="3" fill="#F3F4F6" stroke="#6B7280"/><text x="82" y="722" font-size="12" fill="#4B5563">external API or plain Python tool</text>
-  <rect x="56" y="732" width="16" height="12" rx="3" fill="#F5F3FF" stroke="#7C3AED"/><text x="82" y="742" font-size="12" fill="#4B5563">LLM (dashed purple lines = LLM calls)</text>
-  <rect x="56" y="752" width="16" height="12" rx="3" fill="#FFFFFF" stroke="#6B7280" stroke-dasharray="3 2"/><text x="82" y="762" font-size="12" fill="#4B5563">dashed box = connected but unused</text>
-  </g>
+  <rect x="40" y="580" width="340" height="236" rx="10" fill="#FFFFFF" stroke="#E5E7EB"/>
+  <text x="56" y="602" font-size="12" font-weight="700" fill="#374151">Legend</text>
+  <rect x="56" y="614" width="16" height="12" rx="3" fill="#EEF2FF" stroke="#4F46E5"/><text x="82" y="624" font-size="12" fill="#4B5563">LangGraph step (node)</text>
+  <rect x="56" y="634" width="16" height="12" rx="3" fill="#F0FDF4" stroke="#15803D"/><text x="82" y="644" font-size="12" fill="#4B5563">supervisor + input guardrail</text>
+  <rect x="56" y="654" width="16" height="12" rx="3" fill="#FEF2F2" stroke="#DC2626"/><text x="82" y="664" font-size="12" fill="#4B5563">blocked-request path</text>
+  <rect x="56" y="674" width="16" height="12" rx="3" fill="#FFFBEB" stroke="#B45309"/><text x="82" y="684" font-size="12" fill="#4B5563">human approval (pause) and PostgreSQL</text>
+  <rect x="56" y="694" width="16" height="12" rx="3" fill="#ECFEFF" stroke="#0E7490"/><text x="82" y="704" font-size="12" fill="#4B5563">MCP client or server</text>
+  <rect x="56" y="714" width="16" height="12" rx="3" fill="#F3F4F6" stroke="#6B7280"/><text x="82" y="724" font-size="12" fill="#4B5563">external API or plain Python tool</text>
+  <rect x="56" y="734" width="16" height="12" rx="3" fill="#F5F3FF" stroke="#7C3AED"/><text x="82" y="744" font-size="12" fill="#4B5563">LLM (purple pills = nodes that call it)</text>
+  <rect x="56" y="754" width="16" height="12" rx="3" fill="#FFFFFF" stroke="#6B7280" stroke-dasharray="3 2"/><text x="82" y="764" font-size="12" fill="#4B5563">dashed box = connected but unused</text>
+  <line x1="56" y1="784" x2="72" y2="784" stroke="#B45309" stroke-width="1.8" stroke-dasharray="6 4"/><text x="82" y="788" font-size="12" fill="#4B5563">dashed amber = revision loop</text>
+
+  <!-- routing rules -->
+  <rect x="40" y="860" width="1420" height="116" rx="10" fill="#F9FAFB" stroke="#E5E7EB"/>
+  <text x="60" y="886" font-size="13" font-weight="700" fill="#374151">How a request flows</text>
+  <text x="60" y="908" font-size="12" fill="#4B5563">1. supervisor_agent runs the input guardrail. A non-travel request goes to guardrail_blocked_agent and ends; a travel request continues.</text>
+  <text x="60" y="926" font-size="12" fill="#4B5563">2. The supervisor selects which specialists run (flight, hotel, weather, itinerary, budget). The order is fixed; unselected ones are skipped.</text>
+  <text x="60" y="944" font-size="12" fill="#4B5563">3. After the last specialist, human_approval_agent pauses with interrupt(). Approve → final_agent. Request changes → itinerary_agent again, using the feedback.</text>
+  <text x="60" y="962" font-size="12" fill="#4B5563">4. Pause and resume work because state is checkpointed in PostgreSQL per thread_id; POST /api/approve resumes the run with Command(resume=...).</text>
 
   <!-- footer -->
-  <rect x="40" y="810" width="1420" height="64" rx="10" fill="#F9FAFB" stroke="#E5E7EB"/>
-  <text x="60" y="837" font-size="13" font-weight="700" fill="#374151">Run &amp; deploy</text>
-  <text x="60" y="858" font-size="12" fill="#4B5563">Dockerfile (uv, pre-warms the AviationStack package) → Render, served by uvicorn  ·  LangSmith tracing (graph run + traced tools)  ·  config in .env (LLM_PROVIDER, OPENWEATHER_API_KEY, SERPAPI_API_KEY, TAVILY_API_KEY, DATABASE_URL)</text>
+  <rect x="40" y="990" width="1420" height="56" rx="10" fill="#F9FAFB" stroke="#E5E7EB"/>
+  <text x="60" y="1014" font-size="13" font-weight="700" fill="#374151">Run &amp; deploy</text>
+  <text x="60" y="1034" font-size="12" fill="#4B5563">uv + uvicorn locally, or the Dockerfile (pre-warms the AviationStack package) → Render  ·  LangSmith tracing (optional)  ·  config in .env (LLM_PROVIDER, TAVILY_API_KEY, SERPAPI_API_KEY, OPENWEATHER_API_KEY, DATABASE_URL)</text>
 </svg>
