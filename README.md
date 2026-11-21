@@ -20,6 +20,8 @@ It is a **multi-agent LangGraph workflow** served by **FastAPI**, with a small c
   <sub>Click the diagram to open it full size. Source: <code>docs/architecture.svg</code> (editable text), rendered to <code>docs/architecture.png</code>.</sub>
 </p>
 
+**New to this code?** Open [docs/code-map.html](docs/code-map.html) in your browser (double-click it; no internet needed). It is an interactive map: click a file to see its functions, and step through a request node by node to see exactly which file and function runs at each moment.
+
 ---
 
 ## Table of contents
@@ -174,6 +176,8 @@ Open **<http://127.0.0.1:8000>**. The first start takes longer: it connects to P
 
 More test prompts and expected results are in **[docs/TESTING.md](docs/TESTING.md)**.
 
+Token cost, speed and how to monitor them (and which packages to use) are in **[docs/PERFORMANCE.md](docs/PERFORMANCE.md)**.
+
 ### 7. Run the automated check (optional)
 
 ```bash
@@ -272,7 +276,9 @@ Note: `flight_tool.py` also accepts the misspelt `DEAFAULT_ORIGIN_IATA` as a fal
 ├── templates/index.html           The single page (chat box + start-date picker)
 ├── static/script.js, style.css    Frontend: sends the request, shows the draft with Approve /
 │                                  Request changes buttons, calls /api/approve
-├── docs/                          architecture.svg (editable source) / architecture.png (rendered)
+├── docs/                          architecture.svg (editable source) / architecture.png (rendered),
+│                                  code-map.html (interactive code walkthrough), TESTING.md,
+│                                  PERFORMANCE.md (token cost, speed, monitoring)
 ├── test_hitl.py                   End-to-end test of the pause / revise / approve / guardrail / memory flow
 ├── test_routing.py                Cheap routing test: guardrail + supervisor only (22 prompts)
 ├── test.py                        Prints every tool the MCP client can see (a quick MCP check)
