@@ -9,6 +9,12 @@
   const sendBtn = document.getElementById("send");
   const newChatBtn = document.getElementById("new-chat");
   const startDateInput = document.getElementById("start-date");
+  const reviewInput = document.getElementById("review");
+  // remember the "review the draft" choice between visits
+  try { if (localStorage.getItem("tripmate_review") === "0") reviewInput.checked = false; } catch (_) {}
+  reviewInput.addEventListener("change", () => {
+    try { localStorage.setItem("tripmate_review", reviewInput.checked ? "1" : "0"); } catch (_) {}
+  });
   // YYYY-MM-DD in local time, n days from today
   const isoDate = (n = 0) => {
     const d = new Date();
@@ -131,6 +137,7 @@
           query,
           thread_id: threadId,
           start_date: startDateInput.value || null,
+          review: reviewInput.checked,
         }),
       });
       if (!res.ok) {
@@ -259,6 +266,21 @@
       form.requestSubmit();
     });
   });
+
+  // After a page reload, show again the draft that is still waiting for approval on the saved trip.
+  async function restorePending() {
+    if (!threadId) return;
+    try {
+      const res = await fetch(`/api/pending?thread_id=${encodeURIComponent(threadId)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.pending && data.needs_approval) {
+        if (data.query) addMessage("user", data.query);
+        showApproval(data);
+      }
+    } catch (_) {}
+  }
+  restorePending();
 
   newChatBtn.addEventListener("click", () => {
     try { localStorage.removeItem(THREAD_KEY); } catch (_) {}

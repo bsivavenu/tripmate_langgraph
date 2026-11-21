@@ -108,6 +108,8 @@ button { font: inherit; cursor: pointer; }
 
 .date-pick { display: block; margin: 8px 0 0; font-size: 13px; opacity: .8; }
 .date-pick input { margin-left: 8px; }
+.options { display: flex; flex-wrap: wrap; align-items: center; gap: 0 20px; }
+.review-pick { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 13px; opacity: .8; cursor: pointer; }
 
 /* ---------- hero ---------- */
 .welcome { text-align: center; margin: auto 0; padding: 20px 0; animation: rise 0.6s ease both; }
@@ -194,6 +196,8 @@ button { font: inherit; cursor: pointer; }
   font-weight: 600;
 }
 .copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+/* keep the first line of a reply clear of the Copy button (text wraps around this spacer) */
+.msg.bot .bubble::before { content: ""; float: right; width: 74px; height: 28px; }
 
 /* ---------- rendered markdown ---------- */
 .md > :first-child { margin-top: 0; }

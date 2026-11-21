@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from pydantic import BaseModel
-from backend import run_travel_agent, resume_travel_agent
+from backend import run_travel_agent, resume_travel_agent, get_pending_approval
 
 
 import nest_asyncio
@@ -39,6 +39,7 @@ class PlanRequest(BaseModel):
     query: str
     thread_id: str | None = None
     start_date: str | None = None  # "YYYY-MM-DD" from the date picker
+    review: bool = True            # False = skip the approval step and return the final answer directly
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
@@ -52,7 +53,16 @@ def plan(req: PlanRequest):
     Any error is returned as a 500 with {"detail": ...}.
     """
     try:
-        return run_travel_agent(req.query, req.thread_id, req.start_date)
+        return run_travel_agent(req.query, req.thread_id, req.start_date, req.review)
+    except Exception as e:
+        return JSONResponse({"detail": str(e)}, status_code=500)
+
+
+@app.get("/api/pending")
+def pending(thread_id: str):
+    """The draft waiting for approval on this trip, so the UI can show it again after a reload."""
+    try:
+        return get_pending_approval(thread_id) or {"pending": False}
     except Exception as e:
         return JSONResponse({"detail": str(e)}, status_code=500)
 

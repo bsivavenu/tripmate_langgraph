@@ -21,6 +21,7 @@ load_dotenv()
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -177,6 +178,10 @@ class TravelState(TypedDict):
     approved: bool
     human_feedback: str
     feedback_history: list[str]
+    trip_days_changed: bool
+    revising: bool
+    skip_review: bool
+    last_trip_query: str
     final_response: str
 
 
@@ -242,7 +247,7 @@ PLANNING_RULES = """Rules:
 - Use only the flight and hotel data provided below.
 - Use listed prices from the data when they exist. Never present an invented price as a listed one.
 - When a price is missing (a hotel, a train or bus fare, meals, entry fees), use a realistic typical figure for that place and the traveller's budget level and mark it "(est.)". Flight fares you cannot find may simply be left out in favour of train/bus estimates.
-- Trip length must match the user's request exactly (N days = N-1 nights unless stated otherwise).
+- Trip length must match the user's request exactly (N days = N-1 nights unless stated otherwise). If the user asked for a change after seeing a draft (for example a different number of days), the change wins over the original request.
 - Assume 1 traveller unless the user states otherwise.
 - All totals must add up and stay within the user's stated budget.
 - Use the trip start date given below if there is one; otherwise suggest example travel dates about 8 weeks after today's date.
@@ -290,7 +295,8 @@ class TripRequest(BaseModel):
     )
     budget_inr: int = Field(
         default=0,
-        description="The user's total budget as a whole number in INR (convert if another currency is stated); 0 if no budget is given",
+        description="The user's total budget as a whole number in INR (convert if another currency is stated); 0 if no budget is given. "
+                    "'under 30k' and 'under 30000' both mean 30000; '1 lakh' means 100000; '10,00,000' means 1000000.",
     )
     trip_days: int = Field(
         default=0,
@@ -318,6 +324,12 @@ def input_guardrail_agent(state: TravelState):
     query = state["user_query"]
     llm_calls = state.get("llm_calls", 0)
 
+    previous = state.get("last_trip_query") or ""
+    previous_note = (
+        f"\nEarlier in this conversation the user asked: \"{previous}\". A short follow-up that changes or "
+        "continues that trip (cheaper, longer, a different budget, another city, \"ok book it\") is a valid "
+        "travel request.\n" if previous else ""
+    )
     guardrail_prompt = f"""
 Determine whether the following request asks to PLAN or BOOK a trip, or asks for
 travel help tied to a trip: destinations to visit, flights, hotels, weather for
@@ -328,6 +340,7 @@ Block general-knowledge questions even if they mention a place (for example
 Delhi"), and block anything unrelated to planning a trip, or asking for illegal
 or harmful actions.
 
+{previous_note}
 Return strict JSON only:
 {{
   "allowed": true,
@@ -357,17 +370,18 @@ User request:
 
     if not allowed:
         reason = guardrail_reason or (
-            "TripMate AI can only help with travel-planning requests. "
-            "Please ask about a destination, flight, hotel, weather, budget, "
-            "or itinerary."
+            "TripMate AI can only help with travel-planning requests."
         )
+        # What the user sees: a polite sentence around the model's short reason.
+        message = (f"Sorry, I can't help with that. {reason.strip().rstrip('.')}. "
+                   "I can plan trips: tell me where you want to go, for how many days and your budget.")
         return {
             "guardrail_allowed": False,
             "guardrail_reason": reason,
             "selected_agents": [],
             "trip_constraints": _empty_constraints(),
             "supervisor_reasoning": reason,
-            "final_response": reason,
+            "final_response": message,
             "messages": [AIMessage(content=f"Guardrail blocked request: {reason}")],
             "llm_calls": llm_calls,
         }
@@ -393,6 +407,15 @@ def supervisor_agent(state: TravelState):
     query = state["user_query"]
     llm_calls = state.get("llm_calls", 0)
 
+    previous = state.get("last_trip_query") or ""
+    previous_block = (
+        f'Earlier in this conversation the user asked for this trip: "{previous}"\n'
+        'If the new message is a follow-up that changes or continues that trip and names no new destination '
+        '(for example "make it cheaper", "add one more day", "same trip with a 50000 budget"), rewrite the '
+        'earlier request with the change applied as ONE complete standalone request in "standalone_request". '
+        'If the new message is a new trip or an unrelated request, copy the new message unchanged.\n'
+        if previous else ""
+    )
     supervisor_prompt = f"""
 You are the supervisor of a multi-agent travel-planning system.
 Choose only the specialist agents needed for the request.
@@ -406,6 +429,7 @@ Available agents:
 
 A country, state, region or continent (for example Europe, Kerala, Southeast Asia) counts as a destination.
 Leave "destination" empty only if the request does not name or clearly imply any place.
+{previous_block}
 Set "is_trip_request" to false if the user only asks a question about a place (visa rules, best time to
 visit, general information) and does not ask for a trip plan. Otherwise set it to true.
 
@@ -421,6 +445,7 @@ Return strict JSON only using this schema:
     "special_preferences": []
   }},
   "is_trip_request": true,
+  "standalone_request": "",
   "reasoning": ""
 }}
 
@@ -428,6 +453,7 @@ User request:
 {query}
 """
 
+    merged = ""
     try:
         supervisor_raw = _llm_text(
             "You route work to travel specialist agents. Return strict JSON only.",
@@ -451,6 +477,9 @@ User request:
 
         reasoning = str(parsed.get("reasoning", "")).strip()
         llm_calls += 1
+        # A follow-up ("make it cheaper") becomes one complete request, so every later step plans the right trip.
+        standalone = str(parsed.get("standalone_request") or "").strip()
+        merged = standalone if (previous and standalone and standalone != query) else ""
 
         # Only an information question (visa rules, best time to visit...): do not run the pipeline.
         if parsed.get("is_trip_request", True) is False:
@@ -492,14 +521,19 @@ User request:
             "was selected as a safe fallback."
         )
 
-    return {
+    effective_query = merged if merged else query
+    update = {
         "needs_clarification": False,
         "selected_agents": selected_agents,
         "trip_constraints": constraints,
         "supervisor_reasoning": reasoning,
+        "last_trip_query": effective_query,
         "messages": [AIMessage(content="Supervisor created the agent plan.")],
         "llm_calls": llm_calls,
     }
+    if merged:
+        update["user_query"] = merged
+    return update
 
 
 def parse_request(state: TravelState):
@@ -709,7 +743,9 @@ def itinerary_agent(state: TravelState):
         changes = "\n".join(f"- {c}" for c in history)
         revision_block = (
             "THIS IS A REVISION. Rewrite the previous draft below. Keep everything the user did not ask "
-            "to change, and apply EVERY requested change (earlier ones too).\n"
+            "to change, and apply EVERY requested change (earlier ones too). If a change conflicts with the "
+            f"original request (for example a different number of days), the change wins. Trip length now: "
+            f"{state.get('trip_days') or 'as requested'} days.\n"
             f"Requested changes so far:\n{changes}\n"
             f"Previous draft:\n{state['itinerary']}\n"
         )
@@ -825,6 +861,7 @@ def final_agent(state: TravelState):
         budget_instruction = ("Section 6: give a short budget table; label every figure 'estimate' "
                               "and make sure the rows add up to the stated total.")
 
+    changes_text = "; ".join(state.get("feedback_history") or []) or "none"
     final_prompt = f"""
     Generate the final travel response for the user.
     Today's date: {date.today().isoformat()}
@@ -838,6 +875,8 @@ say "check visa requirements for your passport with the destination's embassy".
 For domestic trips, omit visa advice entirely.
 
     user Request: {state['user_query']}
+
+    Changes the user requested after reviewing the draft (they override the original request where they conflict, e.g. a different number of days): {changes_text}
 
     Flights : {state['flight_results']}
 
@@ -876,8 +915,40 @@ For domestic trips, omit visa advice entirely.
     }
 
 
+def revise_trip_agent(state: TravelState):
+    """Runs after 'Request changes'. Re-reads the trip length and budget with the user's changes applied
+    (so "make it 2 days" really changes trip_days). If the length changed, flight fares for the old
+    dates are stale, so the graph re-runs flight_agent (and skips hotels/weather) before the itinerary.
+    Fails safe: on any error nothing changes."""
+    history = state.get("feedback_history") or []
+    if not history:
+        return {"revising": True, "trip_days_changed": False}
+    try:
+        parser = fast_llm.with_structured_output(TripRequest)
+        changes = "\n".join(f"- {c}" for c in history)
+        trip = parser.invoke([
+            SystemMessage(content="Extract the final trip details. The user's later change requests "
+                                  "override the original request where they conflict "
+                                  "(for example a different number of days or budget)."),
+            HumanMessage(content=f"Original request: {state['user_query']}\n"
+                                 f"Changes requested after seeing a draft:\n{changes}"),
+        ])
+        old_days = state.get("trip_days") or 0
+        new_days = max(trip.trip_days, 0) or old_days
+        new_budget = max(trip.budget_inr, 0) or state.get("budget_inr", 0)
+        return {"trip_days": new_days, "budget_inr": new_budget,
+                "trip_days_changed": bool(new_days and new_days != old_days),
+                "revising": True, "llm_calls": state.get("llm_calls", 0) + 1}
+    except Exception as exc:
+        print(f"Revise fallback used: {exc}", flush=True)
+        return {"revising": True, "trip_days_changed": False}
+
+
 def human_approval_agent(state: TravelState):
     """Pause the run and show the draft itinerary. Resumes when the user answers."""
+    if state.get("skip_review"):
+        # The user chose not to review drafts: approve automatically and go straight to the final answer.
+        return {"approved": True, "human_feedback": "", "feedback_history": list(state.get("feedback_history") or [])}
     # Don't wrap interrupt() in try/except: LangGraph uses an exception to pause.
     review = interrupt({
         "question": "Do you approve this itinerary?",
@@ -912,6 +983,7 @@ graph.add_node("itinerary_agent",itinerary_agent)
 graph.add_node("budget_agent",budget_agent)
 graph.add_node("final_agent",final_agent)
 graph.add_node("reply_agent",reply_agent)
+graph.add_node("revise_trip_agent", revise_trip_agent)
 graph.add_node("human_approval_agent", human_approval_agent)
 
 
@@ -935,6 +1007,8 @@ def next_step(current: str):
     def router(state: TravelState):
         selected = state.get("selected_agents") or AGENT_ORDER
         for name in PIPELINE[PIPELINE.index(current) + 1:]:
+            if state.get("revising") and name in ("hotel_agent", "weather_agent"):
+                continue  # a revision only needs fresh fares, not new hotel or weather searches
             if name in selected:
                 return name
         return "human_approval_agent"
@@ -956,35 +1030,62 @@ for _node in PIPELINE:
     graph.add_conditional_edges(_node, next_step(_node), {t: t for t in _targets})
 
 def route_after_approval(state: TravelState):
-    """Approved -> write the final answer. Not approved -> redo the itinerary with the feedback."""
-    return "final_agent" if state.get("approved") else "itinerary_agent"
+    """Approved -> write the final answer. Not approved -> re-read the trip details with the feedback."""
+    return "final_agent" if state.get("approved") else "revise_trip_agent"
+
+
+def route_after_revise(state: TravelState):
+    """Trip length changed -> fares for the old dates are stale, so search flights again first."""
+    selected = state.get("selected_agents") or AGENT_ORDER
+    if state.get("trip_days_changed") and "flight_agent" in selected:
+        return "flight_agent"
+    return "itinerary_agent"
+
 
 graph.add_conditional_edges(
     "human_approval_agent", route_after_approval,
-    {"final_agent": "final_agent", "itinerary_agent": "itinerary_agent"},
+    {"final_agent": "final_agent", "revise_trip_agent": "revise_trip_agent"},
+)
+graph.add_conditional_edges(
+    "revise_trip_agent", route_after_revise,
+    {"flight_agent": "flight_agent", "itinerary_agent": "itinerary_agent"},
 )
 graph.add_edge("final_agent", END)
 
 
 DATABASE_URL = get_database_url()
 
-_conn = psycopg.connect(
+# A connection pool instead of one shared connection: it replaces a connection the database has
+# dropped (idle timeout, restart) instead of failing until the app is restarted, and it lets two
+# requests use the database at the same time.
+pool = ConnectionPool(
     DATABASE_URL,
-    autocommit= True,
-    row_factory=dict_row
+    min_size=1,
+    max_size=10,
+    kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+    check=ConnectionPool.check_connection,   # test a connection before handing it out
+    open=False,
 )
+try:
+    pool.open(wait=True, timeout=15)
+except Exception as exc:
+    raise RuntimeError(
+        "Cannot connect to PostgreSQL. Check DATABASE_URL in .env and that the database is running "
+        f"({type(exc).__name__})."
+    ) from exc
 
-checkpointer = PostgresSaver(_conn)
+checkpointer = PostgresSaver(pool)
 checkpointer.setup()
 
 travel_graph = graph.compile(checkpointer=checkpointer)
 
 
-def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str | None = None):
+def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str | None = None, review: bool = True):
     """Entry point used by app.py: run the whole graph for one request.
 
     Creates a thread_id if none is given (it keys the saved state in Postgres). start_date is optional,
-    'YYYY-MM-DD'. Returns the final answer plus the intermediate results.
+    'YYYY-MM-DD'. review=False skips the approval pause and returns the final answer directly.
+    Returns the final answer plus the intermediate results.
     """
     if not thread_id:
         thread_id = f"user_{uuid.uuid4().hex}"
@@ -1026,6 +1127,9 @@ def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str
         "approved": False,
         "human_feedback": "",
         "feedback_history": [],
+        "trip_days_changed": False,
+        "revising": False,
+        "skip_review": not review,
 
     },
     config=config
@@ -1056,6 +1160,17 @@ def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str
         "selected_agents": result.get("selected_agents", []),
         "supervisor_reasoning": result.get("supervisor_reasoning", ""),
     }
+
+
+def get_pending_approval(thread_id: str):
+    """The draft waiting for approval on this trip (after a page reload, say), or None."""
+    snapshot = travel_graph.get_state({"configurable": {"thread_id": thread_id}})
+    if "human_approval_agent" not in (snapshot.next or ()):
+        return None
+    v = snapshot.values
+    return {"thread_id": thread_id, "needs_approval": True, "pending": True,
+            "query": v.get("user_query", ""),
+            "draft_itinerary": v.get("itinerary", ""), "budget_table": v.get("budget_table", "")}
 
 
 # One lock per trip: two approvals arriving at the same moment (double click, retry, two tabs)
