@@ -30,6 +30,9 @@ from langchain_core.messages import (AnyMessage,
                                     AIMessage,
                                     SystemMessage)
 
+from langgraph.types import interrupt, Command
+
+
 from langchain_groq import ChatGroq
 # from tools.tavily_tool import tavily_search
 from mcp_client import tavily_mcp_search, weather_now, weather_forecast
@@ -314,13 +317,14 @@ def supervisor_agent(state: TravelState):
     llm_calls = state.get("llm_calls", 0)
 
     guardrail_prompt = f"""
-Determine whether the following request belongs to travel planning or travel
-information. Valid requests can include destinations, flights, hotels, weather,
-budgets, visas, transportation, sightseeing, food, packing, or itineraries.
+Determine whether the following request asks to PLAN or BOOK a trip, or asks for
+travel help tied to a trip: destinations to visit, flights, hotels, weather for
+a trip, budgets, visas, transportation, sightseeing, food, packing, or itineraries.
 
-Block clearly unrelated requests and requests asking for harmful or illegal
-instructions. Do not block a valid travel request merely because some details
-are missing.
+Block general-knowledge questions even if they mention a place (for example
+"what is the capital of Telangana", "who is the CM of Kerala", "population of
+Delhi"), and block anything unrelated to planning a trip.
+
 
 Return strict JSON only:
 {{
@@ -639,6 +643,8 @@ def itinerary_agent(state: TravelState):
     Flight Results: {state['flight_results']}
     Hotel Results: {state['hotel_results']}
     Trip start date: {state.get('start_date') or 'not given (suggest dates about 8 weeks from today)'}
+    Revision feedback from the user (apply it if present): {state.get('human_feedback') or 'none'}
+
     Weather: {state.get('weather_results') or 'not available'}
 
     Make the plan practical and budget aware. Do not claim a flight's arrival time is
@@ -780,6 +786,19 @@ For domestic trips, omit visa advice entirely.
     }
 
 
+def human_approval_agent(state: TravelState):
+    """Pause the run and show the draft itinerary. Resumes when the user answers."""
+    # Don't wrap interrupt() in try/except: LangGraph uses an exception to pause.
+    review = interrupt({
+        "question": "Do you approve this itinerary?",
+        "draft_itinerary": state.get("itinerary", ""),
+        "budget_table": state.get("budget_table", ""),
+    })
+    return {
+        "approved": bool(review.get("approved", False)),
+        "human_feedback": str(review.get("feedback", "")).strip(),
+    }
+
 
 ### Build the graph 
 
@@ -795,6 +814,8 @@ graph.add_node("itinerary_agent",itinerary_agent)
 graph.add_node("budget_agent",budget_agent)
 graph.add_node("final_agent",final_agent)
 graph.add_node("guardrail_blocked_agent",guardrail_blocked_agent)
+graph.add_node("human_approval_agent", human_approval_agent)
+
 
 # Fixed order the steps run in. The supervisor decides WHICH of them run; this decides the order.
 # (budget_agent stays after itinerary_agent because it reads the itinerary's cost lines.)
@@ -813,7 +834,7 @@ def next_step(current: str):
         for name in PIPELINE[PIPELINE.index(current) + 1:]:
             if name in selected:
                 return name
-        return "final_agent"
+        return "human_approval_agent"
     return router
 
 
@@ -824,9 +845,18 @@ graph.add_conditional_edges(
 )
 graph.add_edge("guardrail_blocked_agent", END)
 for _node in PIPELINE:
-    _targets = PIPELINE[PIPELINE.index(_node) + 1:] + ["final_agent"]
+    _targets = PIPELINE[PIPELINE.index(_node) + 1:] + ["human_approval_agent"]
     graph.add_conditional_edges(_node, next_step(_node), {t: t for t in _targets})
-graph.add_edge("final_agent",END)
+
+def route_after_approval(state: TravelState):
+    """Approved -> write the final answer. Not approved -> redo the itinerary with the feedback."""
+    return "final_agent" if state.get("approved") else "itinerary_agent"
+
+graph.add_conditional_edges(
+    "human_approval_agent", route_after_approval,
+    {"final_agent": "final_agent", "itinerary_agent": "itinerary_agent"},
+)
+graph.add_edge("final_agent", END)
 
 
 DATABASE_URL = get_database_url()
@@ -885,9 +915,17 @@ def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str
         "trip_constraints": {},
         "supervisor_reasoning": "",
         "final_response": "",
+        "approved": False,
+        "human_feedback": "",
+
     },
     config=config
     )
+    if result.get("__interrupt__"):
+        draft = result["__interrupt__"][0].value
+        return {"thread_id": thread_id, "needs_approval": True,
+            "draft_itinerary": draft["draft_itinerary"],
+            "budget_table": draft["budget_table"]}
 
     # A request blocked by the input guardrail has no itinerary: its message is final_response.
     if result.get("guardrail_allowed") is False:
@@ -907,3 +945,17 @@ def run_travel_agent(user_input:str, thread_id: str| None= None, start_date: str
         "selected_agents": result.get("selected_agents", []),
         "supervisor_reasoning": result.get("supervisor_reasoning", ""),
     }
+
+
+def resume_travel_agent(thread_id: str, approved: bool, feedback: str = ""):
+    """Continue a paused run with the user's answer."""
+    config = {"configurable": {"thread_id": thread_id}}
+    result = travel_graph.invoke(
+        Command(resume={"approved": approved, "feedback": feedback}), config=config)
+    if result.get("__interrupt__"):  # revision made a new draft: ask again
+        draft = result["__interrupt__"][0].value
+        return {"thread_id": thread_id, "needs_approval": True,
+                "draft_itinerary": draft["draft_itinerary"],
+                "budget_table": draft["budget_table"]}
+    return {"thread_id": thread_id, "needs_approval": False,
+            "answer": result["messages"][-1].content}

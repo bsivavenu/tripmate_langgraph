@@ -147,7 +147,74 @@
         try { localStorage.setItem(THREAD_KEY, threadId); } catch (_) {}
       }
       progress.stop();
+      // addMessage("bot", data.answer || "No answer was returned.", { markdown: true });
+      handleResponse(data);
+
+    } catch (err) {
+      progress.stop();
+      addMessage("error", `Something went wrong: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+    // Either show the draft for approval, or show the final answer.
+  function handleResponse(data) {
+    if (data.needs_approval) {
+      showApproval(data);
+    } else {
       addMessage("bot", data.answer || "No answer was returned.", { markdown: true });
+    }
+  }
+
+  // Draft itinerary + Approve / Request changes buttons.
+  function showApproval(data) {
+    const draft =
+      `**Draft itinerary: please review**\n\n${data.draft_itinerary}\n\n` +
+      (data.budget_table ? `**Estimated budget**\n\n${data.budget_table}` : "");
+    const row = addMessage("bot", draft, { markdown: true });
+
+    const box = document.createElement("div");
+    box.className = "approval";
+    const feedback = document.createElement("textarea");
+    feedback.placeholder = "Want changes? Describe them here (e.g. add a museum on day 2)";
+    feedback.rows = 2;
+    const approveBtn = document.createElement("button");
+    approveBtn.type = "button";
+    approveBtn.className = "approve-btn";
+    approveBtn.textContent = "Approve";
+    const reviseBtn = document.createElement("button");
+    reviseBtn.type = "button";
+    reviseBtn.className = "revise-btn";
+    reviseBtn.textContent = "Request changes";
+    box.append(feedback, approveBtn, reviseBtn);
+    row.querySelector(".bubble").appendChild(box);
+
+    approveBtn.addEventListener("click", () => {
+      box.remove();
+      sendDecision(true, "");
+    });
+    reviseBtn.addEventListener("click", () => {
+      if (!feedback.value.trim()) { feedback.focus(); return; }  // need text to revise
+      box.remove();
+      sendDecision(false, feedback.value.trim());
+    });
+  }
+
+  // Send the user's answer to /api/approve and show whatever comes back
+  // (the final answer, or a new draft if they asked for changes).
+  async function sendDecision(approved, feedback) {
+    setBusy(true);
+    const progress = addProgress();
+    try {
+      const res = await fetch("/api/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thread_id: threadId, approved, feedback }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const data = await res.json();
+      progress.stop();
+      handleResponse(data);
     } catch (err) {
       progress.stop();
       addMessage("error", `Something went wrong: ${err.message}`);

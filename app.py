@@ -11,7 +11,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from pydantic import BaseModel
-from backend import run_travel_agent
+from backend import run_travel_agent, resume_travel_agent
+
 
 import nest_asyncio
 nest_asyncio.apply()
@@ -52,6 +53,21 @@ def plan(req: PlanRequest):
     """
     try:
         return run_travel_agent(req.query, req.thread_id, req.start_date)
+    except Exception as e:
+        return JSONResponse({"detail": str(e)}, status_code=500)
+
+
+class ApproveRequest(BaseModel):
+    thread_id: str
+    approved: bool
+    feedback: str = ""
+
+
+@app.post("/api/approve")
+def approve(req: ApproveRequest):
+    """Resume a paused trip with the user's Approve / Request-changes answer."""
+    try:
+        return resume_travel_agent(req.thread_id, req.approved, req.feedback)
     except Exception as e:
         return JSONResponse({"detail": str(e)}, status_code=500)
 

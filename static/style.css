@@ -304,3 +304,15 @@ button { font: inherit; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+.approval { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 10px; }
+.approval textarea {
+  flex: 1 1 100%; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 12px; font: inherit; resize: vertical; background: var(--surface-2);
+}
+.approval button {
+  padding: 10px 18px; border-radius: 999px; border: 1px solid var(--border);
+  font: inherit; font-weight: 600; cursor: pointer; background: var(--surface);
+}
+.approve-btn { background: var(--grad) !important; color: #fff; border: none !important; }
+.revise-btn:hover { color: var(--accent); border-color: var(--accent); }
