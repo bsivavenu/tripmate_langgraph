@@ -13,8 +13,13 @@ Flow tested:
   7. An information-only question (visa rules)         -> redirected with no pipeline run, no pause
   8. A region as destination ("Europe")                -> treated as a destination, pauses with a draft
   0. (first, no API calls) airport names with a country resolve; Tavily errors raise instead of ""
+  9. Request changes that alters the trip length       -> days, fares and the final answer all follow it
+ 10. Follow-ups ("make it cheaper") on the same trip   -> merged with the earlier request; a new trip is not merged
+ 11. A draft waiting for approval can be looked up     -> get_pending_approval (used to restore it after a reload)
+ 12. review=False                                      -> final answer directly, no approval pause
 """
-from backend import run_travel_agent, resume_travel_agent
+import re
+from backend import run_travel_agent, resume_travel_agent, get_pending_approval, travel_graph
 from mcp_client import _format_results
 from tools.flight_tool import resolve_location_to_iatas
 
@@ -102,5 +107,44 @@ check("info question ran no search agents", r7.get("selected_agents") == [])
 # 8. A region counts as a destination
 r8 = run_travel_agent("15 day trip from Mumbai to Europe under 300000", start_date="2027-03-01")
 check("'Europe' is accepted as a destination", r8.get("needs_approval") is True)
+
+# 9. A revision that changes the trip length must change days, flight dates and the final answer
+def state_of(tid):
+    return travel_graph.get_state({"configurable": {"thread_id": tid}}).values
+
+r9 = run_travel_agent("3 day trip from Hyderabad to Goa under 25000", start_date="2027-02-10")
+r9b = resume_travel_agent(r9["thread_id"], approved=False, feedback="Make it 2 days instead")
+v9 = state_of(r9["thread_id"])
+check("revision updates the trip length to 2", v9.get("trip_days") == 2)
+check("flight fares are searched again for the new dates", "return 2027-02-11" in (v9.get("flight_results") or ""))
+r9c = resume_travel_agent(r9["thread_id"], approved=True)
+days_in_final = set(re.findall(r"Day\s+(\d+)", r9c["answer"]))
+check("final answer has 2 days, not the original 3", days_in_final == {"1", "2"})
+
+# 10. Follow-up memory
+r10 = run_travel_agent("3 day trip from Hyderabad to Goa under 25000", start_date="2027-02-10")
+t10 = r10["thread_id"]
+r10b = run_travel_agent("make it cheaper", thread_id=t10, start_date="2027-02-10")
+v10 = state_of(t10)
+check("follow-up 'make it cheaper' is planned, not asked again", r10b.get("needs_approval") is True)
+check("follow-up keeps the earlier destination", "goa" in (v10.get("user_query") or "").lower())
+check("follow-up lowers the budget", 0 < (v10.get("budget_inr") or 0) < 25000)
+r10c = run_travel_agent("5 day trip from Delhi to Manali under 30000", thread_id=t10, start_date="2027-02-10")
+v10c = state_of(t10)
+check("a new trip on the same thread is NOT merged with the old one",
+      "manali" in (v10c.get("user_query") or "").lower() and "goa" not in (v10c.get("user_query") or "").lower())
+r10d = run_travel_agent("make it cheaper")
+check("a follow-up with no earlier trip still asks for details", r10d.get("needs_clarification") is True)
+
+# 11. Pending draft lookup (used to restore the draft after a page reload)
+pend = get_pending_approval(t10)
+check("a paused trip has a pending draft", bool(pend) and len(pend["draft_itinerary"]) > 100 and "manali" in pend["query"].lower())
+check("a finished trip has no pending draft", get_pending_approval(r9["thread_id"]) is None)
+check("an unknown trip has no pending draft", get_pending_approval("user_does_not_exist") is None)
+
+# 12. Skip review
+r12 = run_travel_agent("2 day trip from Hyderabad to Goa under 20000", start_date="2027-02-10", review=False)
+check("review=False returns the final answer directly", "Final Recommendations" in r12.get("answer", ""))
+check("review=False does not pause", not r12.get("needs_approval"))
 
 print("\nALL TESTS PASSED")
