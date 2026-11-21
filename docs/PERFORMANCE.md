@@ -4,11 +4,11 @@ How much a trip costs in tokens and time, what to measure, how to see it, how to
 
 Measured: 21 Nov 2026 · Branch `multi-agent-supervisor-guardrails-hitl`
 
-**In one paragraph:** one normal trip makes 6 AI calls and uses about 9.6k tokens in about 35 seconds. The slowest and most surprising step is `budget_agent`. You do not need to build monitoring from scratch: **LangSmith tracing is already switched on in your `.env`**, and open-source alternatives (Langfuse, Arize Phoenix) exist if you want your data on your own machine. Only the TripMate-specific quality checks need custom code.
+**In one paragraph:** one normal trip made 6 AI calls and used about 9.6k tokens in about 35 seconds, and the most surprising step was `budget_agent`. **That step is now fixed (section 8): a trip makes 5 AI calls, uses about 7.1k tokens and takes about 29 seconds.** You do not need to build monitoring from scratch: **LangSmith tracing is already switched on in your `.env`**, and open-source alternatives (Langfuse, Arize Phoenix) exist if you want your data on your own machine. Only the TripMate-specific quality checks need custom code.
 
 ---
 
-## 1. What one trip costs (measured)
+## 1. What one trip costs (measured, before the budget speed-up)
 
 One run of "3 day trip from Hyderabad to Goa under 25000", including the Approve step. A temporary recorder (a LangChain callback attached to the graph) counted tokens and time per step. No project file was changed. The model names are what the provider reported for your current setup: `gpt-5-nano` for the "fast" steps and `gpt-6-luna` for the "strong" steps.
 
@@ -82,7 +82,7 @@ Notes: with `LLM_PROVIDER=groq`, `build_llm` ignores the fast/strong role and us
 
 | Change | Saves | Effort |
 |---|---|---|
-| Read the `Costs:` lines in Python first; call the AI only if that fails (`budget_agent`) | about 7 s and 2.2k tokens per trip | Small |
+| ~~Read the `Costs:` lines in Python first; call the AI only if that fails (`budget_agent`)~~ **DONE** (section 8) | saved about 2.4k tokens and 5 to 7 s per trip | Small |
 | Run flights, hotels and weather in parallel (a LangGraph fan-out) | about 4 to 8 s | Medium |
 | Lower the reasoning effort or use a non-reasoning model for the small steps | tokens and seconds on 4 steps | Small |
 | Merge guardrail and supervisor, or use a smaller guardrail model | about 2 s | Small to medium |
@@ -117,6 +117,34 @@ Several packages already do tracing, token and cost tracking, latency and dashbo
 I measured one trip and wrote this guide. I did **not** install any monitoring package, change any app code, or turn LangSmith settings on or off. The per-step recorder I used for the measurement is a temporary script and is not part of the repository.
 
 ---
+
+## 8. The budget speed-up (done)
+
+`budget_agent` no longer asks an AI in the normal case. It now reads the plan's `Costs:` lines in Python, adds the flight fare, and builds the table. The AI is kept only as a fallback.
+
+**What the Python reader does** (`backend.py`: `_parse_cost_lines`, `_pick_fare`, `_travellers`, `_budget_in_python`)
+- Adds up the four categories (hotel, meals, transport, entry/activities) from every day's `Costs:` line, whether or not it has bold text, bullets, commas or "(est.)".
+- Picks the fare of the flight the plan actually uses (it matches the flight number in the plan, for example `6E 362`) and multiplies it by the number of travellers.
+- **Falls back to the AI when unsure:** a day without a `Costs:` line, a line missing a category, several possible fares with no clue which one is used, an unclear number of travellers ("me and my girlfriend", "trip for 2"), or a day whose transport is already as big as the flight fare (the plan probably counted the flight itself, and adding it again would double count).
+
+**Result on a real trip (same prompt, one run each)**
+
+| | Before | After |
+|---|---|---|
+| `budget_agent` time | 7.3 s | **0.0 s** |
+| AI calls per trip | 6 | **5** |
+| Tokens in + out | 5,998 + 3,575 = 9,573 | 4,932 + 2,216 = **7,148** (−25%) |
+| Total time (plan + approve) | 34.6 s | **29.0 s** (−5.6 s, about −16%) |
+
+The other steps vary by a second or two from run to run, so the total is not an exact comparison. The 7.3 s saving on the budget step itself is the reliable number.
+
+**Checked against the AI on your 77 saved trips that had a plan and a stored budget (read-only)**
+- 71 trips (92%) could be handled by Python; 6 correctly fell back to the AI.
+- **68 of the 71 gave exactly the same total as the old AI budget.**
+- The 3 that differed were cases where **Python was right and the old AI budget was wrong**: two used a different flight's fare than the one in the plan (₹210 off), and one dropped a ₹75,000 airfare estimate.
+- Two plans where Python at first double counted the flight were caught by the "transport already includes the flight" rule and now go to the AI.
+
+13 new checks in `test_hitl.py` cover the reader (no API calls needed). A revision also gets the speed-up, because it re-runs the budget step.
 
 ## Sources
 - Langfuse with LangChain and LangGraph (Python): [langfuse.com/integrations/frameworks/langgraph](https://langfuse.com/integrations/frameworks/langgraph), [LangChain docs page](https://docs.langchain.com/oss/python/integrations/providers/langfuse)

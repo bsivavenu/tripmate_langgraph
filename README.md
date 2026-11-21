@@ -95,7 +95,7 @@ flowchart TD
 | `hotel_agent` | One web search per city for hotels with prices. If the search fails, it logs the error and falls back to clearly labelled general advice. | Tavily **MCP** (remote) |
 | `weather_agent` | Trip starts within 4 days → day-by-day forecast. Otherwise → today's weather as a climate hint. One call per city, in parallel; a failed city does not break the plan. | Weather **MCP** (ours) → OpenWeatherMap |
 | `itinerary_agent` | Writes the day-by-day plan and ends every day with a `Costs:` line. Real flight fares are deliberately **left out** of those lines. On a revision it receives the previous draft plus all requested changes. | strong LLM |
-| `budget_agent` | Reads the `Costs:` lines, **adds the flight fare** (fare × travellers), and sums everything **in Python** (LLMs add badly). | fast LLM (extraction) + code |
+| `budget_agent` | Reads the `Costs:` lines of the itinerary **in Python** (no AI call, instant), adds the flight fare (the fare of the flight the plan uses × number of travellers) and sums everything. If the plan looks unusual (a day without a `Costs:` line, several possible fares, an unclear number of travellers, or a day whose transport already includes the flight) it falls back to asking the fast AI to extract the costs. | code first, fast LLM only as a fallback |
 | `revise_trip_agent` | After *Request changes*: re-reads trip length and budget with all your changes applied. If the length changed, the graph re-runs `flight_agent` (fares for the old dates are stale) and skips the hotel and weather searches; otherwise it goes straight to `itinerary_agent`. | fast LLM |
 | `human_approval_agent` | Calls `interrupt()` with the draft itinerary and budget table. The run stops here and resumes when `POST /api/approve` is called. Auto-approves when the user turned the review off. Not wrapped in `try/except` on purpose: LangGraph uses an exception to pause. | none |
 | `final_agent` | Writes the final answer in 7 sections (summary, flights, hotels, weather, itinerary, budget, recommendations) using the computed budget table. | strong LLM |
@@ -392,7 +392,7 @@ The planner resolves city names to airport codes with `airportsdata`, and some n
 
 ### How `llm_calls` is counted
 
-`llm_calls` counts agents that really call an LLM (guardrail, supervisor, parse, itinerary, budget extraction, final). The flight, hotel, weather and reply nodes make no LLM call and do not add to it. A normal trip is about 5–6; each revision adds about 2 (itinerary + budget). It is returned in the final `/api/plan` response for blocked requests.
+`llm_calls` counts agents that really call an LLM (guardrail, supervisor, parse, itinerary, final, and the budget step only when it falls back to the AI). The flight, hotel, weather and reply nodes make no LLM call and do not add to it. A normal trip is 5; each revision adds about 2 (revise + itinerary). It is returned in the final `/api/plan` response for blocked requests.
 
 ### Why the approval step is a pause, not a loop in the browser
 

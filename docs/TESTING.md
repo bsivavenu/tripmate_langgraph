@@ -82,6 +82,7 @@ Regression check after fixes 1 to 4 (before fixes 5 and 6 were made): 8 prompts 
 - **Restore a pending draft after a reload** (`GET /api/pending`). Verified in the browser: reload with a draft open, the draft and buttons returned, Approve finished the plan.
 - **Optional review.** An "Review the draft before the final plan" checkbox (remembered between visits, on by default). Verified: unchecked, a trip goes straight to the final answer.
 - **Friendlier block messages** (see above).
+- **Budget read in Python (later the same day).** `budget_agent` reads the plan's `Costs:` lines without an AI call and falls back to the AI when unsure. 13 new checks in `test_hitl.py`, plus a comparison against 77 saved trips (see `docs/PERFORMANCE.md`, section 8).
 - **Automated routing tests.** `test_routing.py` runs 22 clear-cut prompts through the guardrail and supervisor only (about 2 cheap LLM calls each, no searches) and prints a list of borderline prompts for review.
 
 ### Not tested
@@ -238,7 +239,7 @@ Runs 22 clear-cut prompts through only the guardrail and the supervisor (no sear
 uv run python test_hitl.py
 ```
 
-It prints `PASS` or `FAIL` for each check, ending with `ALL TESTS PASSED`. The first checks need no API calls (airport names such as `Bali, Indonesia`, `Kyoto` and `Leh`; Tavily error handling). The rest use real API calls (several credits; it takes a few minutes). It covers: pause for approval, two revisions in a row, approval, rejecting a repeated or unknown approval, the guardrail, clarification, information-only questions, "Europe" as a destination, a revision that changes the trip length, follow-up memory, the pending-draft lookup, and skipping the review.
+It prints `PASS` or `FAIL` for each check, ending with `ALL TESTS PASSED`. The first checks need no API calls (airport names such as `Bali, Indonesia`, `Kyoto` and `Leh`; Tavily error handling; reading the budget in Python). The rest use real API calls (several credits; it takes a few minutes). It covers: pause for approval, two revisions in a row, approval, rejecting a repeated or unknown approval, the guardrail, clarification, information-only questions, "Europe" as a destination, a revision that changes the trip length, follow-up memory, the pending-draft lookup, and skipping the review.
 
 ### Other quick checks
 
